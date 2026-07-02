@@ -1,0 +1,14 @@
+# Build output (rebuild from source; the exe ships via GitHub Releases)
+dist/
+tests/run-tests.exe
+*.pdb
+
+# Internal planning notes (not part of the shipped source)
+docs/design.md
+docs/plan.md
+
+# Game config backups
+*.bak
+
+# Per-copy saved game path (created at runtime)
+fixres-path.txt

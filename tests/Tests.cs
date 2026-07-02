@@ -13,7 +13,7 @@ public static class Tests
 
     const string Sample =
         "[OPTION]\r\nMusicVolume = 0\r\nGameWndSizeWidth = 1920\r\nGameWndSizeHeight = 1080\r\n" +
-        "GameWndFullScreen = 0\r\nScreenLeft = 0\r\nScreenTop = 0\r\nScreenWidth = 1280\r\nScreenHeight = 720\r\n" +
+        "GameWndFullScreen = 1\r\nScreenLeft = 0\r\nScreenTop = 0\r\nScreenWidth = 1280\r\nScreenHeight = 720\r\n" +
         "[SYSTEM]\r\nSwitchscreen = 1\r\n";
 
     static void TestIni()
@@ -23,6 +23,9 @@ public static class Tests
         Check(FixCore.ReadIntKey(o, "ScreenHeight") == 1440, "ini ScreenHeight set");
         Check(FixCore.ReadIntKey(o, "GameWndSizeWidth") == 2560, "ini GameWndSizeWidth set");
         Check(o.Contains("MusicVolume = 0") && o.Contains("[SYSTEM]"), "ini preserves other lines");
+        Check(FixCore.ReadIntKey(o, "GameWndFullScreen") == 1, "ini leaves GameWndFullScreen alone by default");
+        string w = FixCore.ApplyResolution(Sample, 1920, 1080, true);
+        Check(FixCore.ReadIntKey(w, "GameWndFullScreen") == 0, "ini forces windowed when asked");
     }
 
     static void TestRenderPatch()
@@ -39,9 +42,13 @@ public static class Tests
         Check(i1.Candidate0W == 1920 && i1.Candidate0H == 1080, "after apply top candidate 1920x1080");
         Check(RenderPatch.Apply(d, 1920, 1080).Success, "re-apply is idempotent");
         byte[] d3 = File.ReadAllBytes(PristineDat);
-        RenderPatch.Apply(d3, 2560, 1440);
+        RenderPatch.Apply(d3, 1600, 900);
         InspectResult i3 = RenderPatch.Inspect(d3);
-        Check(i3.Candidate0W == 2560 && i3.Candidate0H == 1440, "per-resolution: 2560x1440");
+        Check(i3.Candidate0W == 1600 && i3.Candidate0H == 900, "per-resolution: 1600x900");
+        byte[] d4 = File.ReadAllBytes(PristineDat);
+        RenderPatch.Apply(d4, 2560, 1440);
+        InspectResult i4 = RenderPatch.Inspect(d4);
+        Check(i4.Candidate0W == 1920 && i4.Candidate0H == 1080, "above 1080p is capped to 1920x1080");
     }
 
     static void TestGameFiles()
@@ -63,11 +70,20 @@ public static class Tests
             Check(st.Applied && st.CurrentW == 1920, "inspect reports applied at 1920");
             Check(st.HasBackup, "inspect reports a backup exists");
             Check(FixCore.ReadIntKey(File.ReadAllText(Path.Combine(tmp, "midage.ini")), "ScreenWidth") == 1920, "midage.ini updated on disk");
+            Check(FixCore.ReadIntKey(File.ReadAllText(Path.Combine(tmp, "midage.ini")), "GameWndFullScreen") == 1, "1080p or lower stays fullscreen");
 
             ApplyOutcome rev = GameFiles.RevertLast(tmp);
             Check(rev.Success, "RevertLast success");
             GameStatus st2 = GameFiles.Inspect(tmp);
             Check(!st2.Applied && st2.CurrentW == 3840, "after revert -> unpatched (candidate 3840 restored)");
+
+            // a 4K request is hard-capped to 1080p in BOTH the client and the INI,
+            // and an above-ceiling monitor switches the game to windowed
+            GameFiles.ApplyRenderFix(tmp, 3840, 2160, new DateTime(2026, 7, 2, 2, 0, 0), true);
+            GameStatus st3 = GameFiles.Inspect(tmp);
+            Check(st3.CurrentW == 1920 && st3.CurrentH == 1080, "4K request capped to 1920 in the client");
+            Check(FixCore.ReadIntKey(File.ReadAllText(Path.Combine(tmp, "midage.ini")), "ScreenWidth") == 1920, "4K request capped to 1920 in midage.ini");
+            Check(FixCore.ReadIntKey(File.ReadAllText(Path.Combine(tmp, "midage.ini")), "GameWndFullScreen") == 0, "above 1080p switches to windowed");
         }
         finally { try { Directory.Delete(tmp, true); } catch { } }
     }

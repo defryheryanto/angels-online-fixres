@@ -78,10 +78,10 @@ Prefer to verify first? You have options:
 
 - **Scan it.** Upload the file to [VirusTotal](https://www.virustotal.com/) or
   paste the hash below.
-- **Check the hash.** The SHA-256 of `AngelsOnlineFixRes.exe` for v1.0.0 is:
+- **Check the hash.** The SHA-256 of `AngelsOnlineFixRes.exe` for v1.1.0 is:
 
   ```text
-  AB7CB14997E72754502BBFCC6A3B20728EBB3954D2EA13F48965FB1AE397576B
+  2B2A5BE5E166E2306F26397CEA38D42C1F44539A473AFD477B73A404D5E802B9
   ```
 
   Verify it on your machine with:

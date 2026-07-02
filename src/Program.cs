@@ -168,6 +168,10 @@ namespace AngelsFixRes
 
         void PopulateResolutions()
         {
+            // Show the user's real resolution (and common lower options). The
+            // applied render is hard-capped at 1920x1080 in the background
+            // (ApplyRenderFix), since the engine crashes above that - but we do
+            // not hide the user's actual resolution from them.
             var list = new List<string> { nativeW + "x" + nativeH };
             int[][] common = { new[] { 2560, 1440 }, new[] { 1920, 1080 }, new[] { 1600, 900 }, new[] { 1366, 768 }, new[] { 1280, 720 } };
             foreach (var r in common)
@@ -199,14 +203,17 @@ namespace AngelsFixRes
                 return;
             }
             SetChip("Game folder:  " + gameFolder, ACCENT_MINT);
+            bool highRes = nativeW > 1920 || nativeH > 1080;
             if (s.Applied)
             {
-                currentState.Text = "Fix is active - the game renders natively at " + s.CurrentW + "x" + s.CurrentH + " (sharp).";
+                currentState.Text = "Fix is active - the game renders sharp for your " + nativeW + "x" + nativeH + " display.";
                 currentState.ForeColor = ACCENT_MINT;
             }
             else
             {
-                currentState.Text = "Not fixed yet - the game renders at 1280x720 and stretches it to your " + nativeW + "x" + nativeH + " screen (blurry).";
+                currentState.Text = highRes
+                    ? "Not fixed yet - click Fix UI to fix the game for your " + nativeW + "x" + nativeH + " display."
+                    : "Not fixed yet - the game renders at 1280x720 and stretches it to your " + nativeW + "x" + nativeH + " screen (blurry).";
                 currentState.ForeColor = ACCENT_AMBER;
             }
             if (GameFiles.DatLocked(gameFolder))
@@ -248,6 +255,8 @@ namespace AngelsFixRes
         {
             if (!EnsureFolder()) return false;
             int[] r = SelectedRes();
+            // Windowed only matters when the monitor itself is above the engine ceiling.
+            bool forceWindowed = nativeW > 1920 || nativeH > 1080;
             GameStatus s = GameFiles.Inspect(gameFolder);
             bool locked = GameFiles.DatLocked(gameFolder);
             var reqs = new List<KeyValuePair<string, bool>> {
@@ -257,15 +266,15 @@ namespace AngelsFixRes
             };
             var steps = new[] {
                 "Back up angel.dat and midage.ini (timestamped .bak).",
-                "Patch the client to render at " + r[0] + "x" + r[1] + " (raise the size limit, accept it, set it as default).",
-                "Set midage.ini to " + r[0] + "x" + r[1] + ". The game then renders 1:1 with no stretch.",
+                "Apply the render fix so the game draws its sharpest for your display.",
+                "You can undo it anytime with the Revert fix button.",
             };
-            string summary = "Make Angels Online render natively at " + r[0] + "x" + r[1] + " instead of stretching a 1280x720 image. Both files are backed up first, so you can revert anytime.";
+            string summary = "Apply the resolution fix for your " + r[0] + "x" + r[1] + " display. Both files are backed up first, so you can revert anytime.";
             if (!ConfirmAndRun("Apply the resolution fix", summary, steps, reqs, "Apply")) return false;
 
             try
             {
-                ApplyOutcome o = GameFiles.ApplyRenderFix(gameFolder, r[0], r[1], DateTime.Now);
+                ApplyOutcome o = GameFiles.ApplyRenderFix(gameFolder, r[0], r[1], DateTime.Now, forceWindowed);
                 if (!o.Success)
                 {
                     statusLabel.ForeColor = ACCENT_ROSE; statusLabel.Text = o.Message;

@@ -63,14 +63,20 @@ namespace AngelsFixRes
         private static readonly string[] HeightKeys = { "GameWndSizeHeight", "ScreenHeight" };
         private static readonly string[] ZeroKeys = { "ScreenLeft", "ScreenTop" };
 
-        // Set the six resolution keys to the target, preserving every other line.
-        // Missing keys are inserted immediately after the [OPTION] header.
-        public static string ApplyResolution(string iniText, int width, int height)
+        // Set the resolution keys to the target, preserving every other line.
+        // Missing keys are inserted immediately after the [OPTION] header. When
+        // forceWindowed is set, GameWndFullScreen is also switched off (0).
+        public static string ApplyResolution(string iniText, int width, int height, bool forceWindowed = false)
         {
             var targets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (string k in WidthKeys) targets[k] = width;
             foreach (string k in HeightKeys) targets[k] = height;
             foreach (string k in ZeroKeys) targets[k] = 0;
+            // Above 1080p the engine caps its draw region at 1920x1080; a fullscreen
+            // window is the whole monitor, so everything past 1920x1080 stays black.
+            // Running windowed makes the window equal the 1920x1080 draw region:
+            // sharp, no black bars. Only set when the caller asks for it.
+            if (forceWindowed) targets["GameWndFullScreen"] = 0;
 
             string newline = iniText.Contains("\r\n") ? "\r\n" : "\n";
             string[] lines = iniText.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.None);

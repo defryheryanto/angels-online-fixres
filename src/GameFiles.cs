@@ -109,9 +109,17 @@ namespace AngelsFixRes
         }
 
         // Back up both files, patch angel.dat for WxH, and set midage.ini.
-        public static ApplyOutcome ApplyRenderFix(string gameFolder, int width, int height, DateTime now)
+        public static ApplyOutcome ApplyRenderFix(string gameFolder, int width, int height, DateTime now, bool forceWindowed = false)
         {
             var outc = new ApplyOutcome();
+            // Always hard-cap the render at the engine's 1080p ceiling in the
+            // background: never write a higher render size to the client OR to
+            // midage.ini (above 1080p the game crashes). The UI still shows the real
+            // resolution. When the monitor itself is above the ceiling the caller
+            // passes forceWindowed, so the window matches the 1920x1080 draw region
+            // instead of the whole monitor (which would otherwise leave black bars).
+            if (width > 1920) width = 1920;
+            if (height > 1080) height = 1080;
             string dat = Path.Combine(gameFolder, DatName);
             string ini = Path.Combine(gameFolder, IniName);
             if (!File.Exists(dat)) { outc.Message = "angel.dat not found in the selected folder."; return outc; }
@@ -129,7 +137,7 @@ namespace AngelsFixRes
             {
                 outc.IniBackup = ini + "." + stamp + BakSuffix;
                 File.Copy(ini, outc.IniBackup, true);
-                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), width, height);
+                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), width, height, forceWindowed);
                 File.WriteAllText(ini, fixedIni);
             }
 

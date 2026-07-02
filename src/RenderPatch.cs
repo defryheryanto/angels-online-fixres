@@ -31,8 +31,12 @@ namespace AngelsFixRes
     // safe (idempotent) and absolute addresses are wildcarded for build safety.
     public static class RenderPatch
     {
-        // High ceiling so any monitor (up to 8K) is accepted by the clamp.
-        const int ClampLimit = 16384;
+        // The engine only renders reliably up to 1080p; above that it shows black
+        // bars on the right and then crashes on world entry (its buffers were only
+        // ever sized for <=1080p). So the clamp is lifted to exactly 1920x1080 and
+        // NOT beyond - this is a hard ceiling even if a stray config asks for more.
+        const int ClampLimitW = 1920;
+        const int ClampLimitH = 1080;
 
         // -1 = wildcard.
         // cmp eax,IMM ; jg .. ; cmp ecx,IMM ; jg .. ; mov [renderW],eax ; mov [renderH],ecx
@@ -110,6 +114,9 @@ namespace AngelsFixRes
         public static PatchResult Apply(byte[] dat, int width, int height)
         {
             var res = new PatchResult();
+            // Never target above the engine's 1080p ceiling (higher crashes).
+            if (width > ClampLimitW) width = ClampLimitW;
+            if (height > ClampLimitH) height = ClampLimitH;
             int clamp = Find(dat, Clamp);
             if (clamp < 0 || !ClampIsRenderSetter(dat, clamp)) { res.Message = "Could not find the render-size clamp - this client build is not recognised. Nothing was changed."; return res; }
             int val = Find(dat, ValidateBody);
@@ -117,9 +124,9 @@ namespace AngelsFixRes
             int cand = Find(dat, CandidateTail);
             if (cand < 0) { res.Message = "Could not find the resolution table - this client build is not recognised. Nothing was changed."; return res; }
 
-            // 1. raise the clamp
-            WI32(dat, clamp + 1, ClampLimit);
-            WI32(dat, clamp + 9, ClampLimit);
+            // 1. lift the clamp to the engine's safe ceiling (1080p), not beyond
+            WI32(dat, clamp + 1, ClampLimitW);
+            WI32(dat, clamp + 9, ClampLimitH);
             // 2. validator always accepts (mov al,1 ; ret) at the function entry
             dat[val - 3] = 0xB0; dat[val - 2] = 0x01; dat[val - 1] = 0xC3;
             // 3. top candidate = target resolution

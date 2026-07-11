@@ -1,108 +1,194 @@
-# How Angels Online FixRes Works
+# How Angels Online FixRes works
 
-## TL;DR (the honest one-liner)
+This is the honest, technical account of what the *Angels Online Global* client
+does with resolution, what actually goes wrong on modern monitors, and exactly
+what the tool changes. Everything here was reverse-engineered from the shipping
+`angel.dat` (build 4774912) and cross-checked against the running client.
 
-It flips a handful of bytes in the game client so it renders at your real
-resolution instead of a fixed 1280x720. That's it. Everything below is the
-grown-up, over-engineered description of those few bytes.
+If you just want the short version: **the game draws its world at a small, fixed
+size and then stretches that picture onto your screen. The tool makes that stretch
+fill your whole monitor cleanly, in a borderless-fullscreen window.** The longer
+version below explains why it is done that way and not another, because the "not
+another" part is where the interesting discoveries are.
 
 ---
 
-## 1. Problem statement: the sub-native fractional-rescale pathology
+## 1. What the client actually does
 
-The `Angels Online Global` client is a 32-bit, GDI-backed, sprite-compositing
-engine whose scene rasterizer is pinned to a **fixed 1280x720 intermediate
-framebuffer** established at its original design-time art authorship resolution.
-At runtime the compositor performs a terminal-stage **`StretchBlt` upsample** of
-that device-independent bitmap (DIB) into the host window's client rectangle.
+The client is a 32-bit Windows game. Its renderer is a hybrid that surprised us:
 
-When the target window is 1920x1080, the transfer function degenerates into a
-non-integer 1.5x magnification. Because the source and destination raster grids
-are mutually irrational under integer pixel quantization, every source texel is
-distributed across a fractional destination footprint, and GDI's interpolation
-kernel (nearest-neighbour or halftone, depending on the active stretch-blit mode)
-introduces the characteristic low-pass "soft/zoomed" artifact. In plain terms:
-1280 pixels cannot cleanly become 1920 pixels, so it looks blurry.
+1. **The world is composited with GDI.** The scene (map, sprites, characters, UI)
+   is drawn into an in-memory bitmap using plain GDI. Crucially, the size of that
+   composite bitmap is **not** your window size and **not** a resolution setting -
+   it comes from the game's own art/scene descriptor. It is a fixed, authored size.
+2. **The frame is presented with Direct2D.** That composited bitmap is uploaded to
+   a Direct2D render target (`ID2D1HwndRenderTarget`) and drawn to the window with
+   `DrawBitmap`, which **stretches** it to the render target's size.
 
-## 2. The rendering subsystem: a DIB-section double-buffered blit pipeline
+So there are two completely separate size systems in play, and telling them apart
+is the whole story:
 
-The engine's presentation path is a classical retained off-screen compositor:
+| System | What sets it | What it controls |
+|---|---|---|
+| **Render / present size** | the client's resolution globals (fed from `midage.ini` and an internal clamp) | the window size, the Direct2D target size, the stretch destination |
+| **Scene composite size** | the baked art/scene descriptor | how large the world is actually drawn before it is stretched |
 
-1. `CreateDIBSection` allocates the backing raster surface (the render target),
-   dimensioned from the client's internally-arbitrated **render resolution**.
-2. `CreateCompatibleBitmap` / `CreateCompatibleDC` establish the device-context
-   scaffolding for the memory blit.
-3. `SetStretchBltMode` configures the resampling policy.
-4. `StretchBlt` performs the source-to-window raster transfer with scaling.
+The important, non-obvious fact: **these two systems never talk to each other in
+the code.** The resolution globals are referenced only in the window/present code;
+the scene composite size is set only in the scene/asset code. Nothing copies one
+into the other.
 
-Critically, the render-target dimensions are **not** the window dimensions. They
-are governed independently by a dedicated resolution-arbitration state machine.
+---
 
-## 3. The resolution-governance finite state machine
+## 2. The original problem: a blurry fractional stretch
 
-The client stores its render dimensionality in a pair of adjacent 32-bit global
-lattice cells (`renderW`, `renderH`). These are populated by a three-way
-arbitration protocol:
+Out of the box, the client's render/present size is clamped to a small fixed ceiling
+(historically 1280x720), and the scene composites into its own separate, art-baked
+surface. On a 1920x1080 monitor the picture is stretched about 1.5x. A 1.5x stretch
+can't land on whole pixels, so every edge is smeared - the classic "soft, zoomed-in"
+look. On a 4K or ultrawide monitor it's worse, or the game simply runs in a small
+window.
 
-- **INI-derived hydration.** On boot, `ScreenWidth` / `ScreenHeight` are parsed
-  from `midage.ini` and proposed to the arbiter.
-- **Capability validation.** A validator enumerates the host's supported display
-  modes via `EnumDisplaySettings` and gates the proposed resolution against them,
-  reverting non-conforming proposals.
-- **Best-fit candidate election.** On a cold/first launch, the arbiter iterates a
-  descending-ordered **candidate resolution table** and elects the first
-  admissible entry.
+That is the problem the tool exists to fix.
 
-The pathology is enforced by a **`SetRenderSize` boundary clamp**: a conditional
-guard (`cmp / jg`) that rejects any proposed dimension exceeding the design-time
-ceiling of 1280x720, discarding the write entirely. This is the single most
-consequential control-flow edge in the entire subsystem, and it is why editing
-`midage.ini` alone accomplishes nothing.
+---
 
-## 4. Signature-directed idempotent binary morphology (the actual patch)
+## 3. The tempting wrong answer: "just render at native resolution"
 
-FixRes performs **surgical in-place instruction rewriting** against the client
-image. To remain resilient across client revisions (which shift absolute file
-offsets), it does not hard-code addresses. Instead it employs **wildcard-masked
-byte-pattern signatures** anchored on displacement-invariant opcode topology,
-with all absolute operands (globals, RVA-relative pointers) masked out. Three
-transformations are applied:
+The obvious idea is: lift the clamp so the client renders at your monitor's real
+resolution, and you get a crisp 1:1 image. We tried exactly that, and it produces a
+very specific, very telling bug on high-resolution monitors:
 
-1. **Clamp ceiling elevation.** The two comparison immediates in the
-   `SetRenderSize` guard are raised from `0x500`/`0x2D0` to a permissive `0x4000`
-   upper bound, neutralizing the sub-native rejection edge. A structural
-   post-condition (renderW/renderH globals must be 4-byte-adjacent) is asserted to
-   guarantee the signature bound to the correct call site.
-2. **Validator short-circuit.** The capability-validation routine's prologue is
-   overwritten with an unconditional affirmative return (`mov al,1 ; ret`), so the
-   arbiter accepts the operator-elected resolution without display-mode veto.
-3. **Candidate-apex substitution.** The zeroth entry of the candidate resolution
-   table is rewritten to the operator's native geometry, so even the cold-launch
-   election path converges on the native mode.
+> The game window correctly covers the whole screen, but the picture is drawn small
+> in the **top-left corner**, with the rest of the screen black.
 
-Coupled with a corresponding `midage.ini` hydration, the render target is now
-allocated at native geometry, the terminal `StretchBlt` becomes an identity
-(1:1) transfer, and the fractional-rescale pathology is eliminated.
+Here is why, and it is the key discovery. When you raise the render clamp to, say,
+5120x2160:
 
-All rewrites are **idempotent**: signatures anchor exclusively on bytes the patch
-does not mutate, so re-application is a no-op-equivalent convergent operation.
+- The resolution globals, the window, and the Direct2D target **all correctly
+  become 5120x2160.** That part works.
+- But the world still composites into its **baked scene surface** - a small, fixed
+  authored size that no resolution setting can change, because (as section 1 showed)
+  the scene size system doesn't read the resolution globals at all. They are walled
+  off from each other in the binary.
 
-## 5. Safety invariants and rollback semantics
+So the small scene is composited into the top-left of the correctly-native render
+buffer, and Direct2D then presents that whole buffer - only the top-left corner has
+picture, the rest is black. We confirmed this on a real 5120x2160 monitor with a live
+diagnostic that read the client's own size globals: every one was correct and
+full-screen (render and display both reported 5120x2160), yet the picture stayed
+small in the top-left. That ruled out "the buffer is too small" and pointed straight
+at the second, hidden size system - the baked scene.
 
-- **Fingerprint-gated refusal.** If any of the three signatures fails to resolve,
-  the tool aborts without a single write. It will never mutate an image it does
-  not structurally recognize.
-- **Timestamped snapshot backups.** Prior to mutation, `angel.dat` and
-  `midage.ini` are copied to timestamped `.fixres.bak` restore points. The
-  in-app **Revert** action restores the most recent snapshot.
-- **Zero residual coupling.** The tool touches only render geometry. Account
-  state, network protocol, and gameplay logic are wholly untouched.
+**Conclusion: this engine cannot be made to render its world at more than its baked
+resolution by patching the client.** The scene is authored at a fixed size. Asking
+for "true native" only grows the buffer, not the art.
 
-## 6. In fewer words
+---
 
-It raises a size limit, tells one check to say "yes", sets the default
-resolution, and updates the config. Then the game draws at your resolution.
+## 4. The right answer: make the stretch fill the screen
 
-## Credits
+Since the world is drawn at a fixed size and Direct2D already **stretches** it to
+the present target, the correct fix is to keep the render small and make the target
+- and therefore the stretch - fill your whole screen. That is what the tool does:
 
-Reverse-engineered and built by **nosorry**. Reach out on Discord: **no.sorry**.
+1. **Render at a shipped 1920x1080 layout.** 1080p is the largest resolution the
+   game ships a matching HUD layout for. (This is also an upgrade over the stock
+   720p: the HUD and interface layer are drawn at a higher resolution than stock.)
+2. **Set the window to your monitor's full size and go borderless fullscreen.** The
+   client already has a fullscreen code path that builds a borderless window
+   covering the monitor; the tool steers into it.
+3. **Let Direct2D stretch 1080p up to your screen.** `DrawBitmap` scales the render
+   to the full target size, so the picture fills the whole monitor. On a 16:9 screen
+   this is a clean, aspect-correct (undistorted) upscale.
+
+The net result is a full-screen picture at a higher render resolution than stock,
+instead of a blurry fractional stretch or a small window - achieved by fixing the
+*stretch*, which is the part of
+the pipeline that was actually misconfigured, rather than fighting the render size,
+which was never the real lever.
+
+---
+
+## 5. The exact changes
+
+All patches are applied to a **copy** in memory and written back only after they all
+succeed; the original files are backed up first. The binary edits are located by
+**byte-pattern signature** (with the volatile bytes wildcarded), never by hardcoded
+file offset, so a future game update that shifts code around does not silently land a
+patch in the wrong place - if a signature no longer matches, the tool refuses to
+write anything at all.
+
+**In `angel.dat`:**
+
+- **Render clamp raised to 1920x1080.** The client's render-size guard rejects any
+  request above its baked ceiling; the tool raises that ceiling to 1920x1080 so the
+  1080p render is accepted. It is deliberately **not** raised to your native size -
+  section 3 explains why that would break.
+- **Resolution validator forced to accept.** A routine that vetoes non-enumerated
+  modes is made to always approve, so the chosen size isn't reverted at boot.
+- **In-game resolution list collapsed to one entry**, and the in-game Display
+  "Apply" is turned into a safe no-op (with an on-screen notice on recognized
+  builds). Changing resolution from inside the game fights the tool's fixed setup and
+  can misplace the interface, so the tool owns resolution and the in-game menu is
+  disabled on purpose.
+- **Borderless-fullscreen behavior.** A handful of small edits make the fullscreen
+  window behave like a proper borderless-windowed mode: no exclusive display-mode
+  switch (no black-screen flicker on Alt-Tab), it doesn't minimize or freeze when you
+  tab out, and it doesn't force itself on top of other windows. (A scaling-mode edit
+  also sharpens the client's *internal* composite step; the final on-screen upscale
+  to your monitor is Direct2D's own stretch, which the tool doesn't change.)
+
+**In `midage.ini`:** the window size is set to your monitor's resolution and
+fullscreen is enabled, so the client drives the window and stretch target to your
+full screen.
+
+**A Windows per-app "high-DPI aware" flag** is set on the client, so the picture is
+sized in real pixels (not soft-upscaled by Windows) at any display scaling.
+
+The only new code is a tiny stub that shows the on-screen "resolution is managed by
+the tool" notice; everything else - the fullscreen path, the stretch, the render
+buffers - is the client's own, and the tool only changes which sizes they use and how
+the window behaves.
+
+---
+
+## 6. Ultrawide and non-16:9 screens
+
+The world is authored at 16:9. On a 16:9 monitor (1080p, 1440p, 4K, 5K) the 1080p
+render stretches to your screen with no distortion. On an ultrawide or other non-16:9
+screen (for example 5120x2160, 21:9), filling the whole screen means stretching a
+16:9 picture wider than it was drawn, so the image is a little horizontally stretched
+in exchange for using the full width. That is a deliberate trade in favor of a
+genuinely full-screen picture. A pillarboxed (no-stretch, slim black side-bars)
+option may be added later; today the tool always fills.
+
+---
+
+## 7. Safety and reverting
+
+- **Signature-gated.** If any patch site fails to match, the tool aborts without a
+  single byte written. It will not touch a client it does not recognize.
+- **Backups.** `angel.dat` and `midage.ini` are copied to timestamped
+  `.fixres.bak` restore points before any change. **Revert** restores the most
+  recent clean backup, and you can also revert by hand (rename the newest backup
+  back over the original).
+- **No account or gameplay changes.** The tool only touches render geometry and
+  window behavior. It does not read, send, or modify account data, and it does
+  nothing to network traffic or game logic.
+
+---
+
+## 8. Honest limitations
+
+- It cannot make the world render in more detail than the art is authored at. It
+  fills your screen cleanly and at a higher internal resolution than stock, but this
+  is a well-scaled classic 2D game, not a re-render.
+- Non-16:9 screens fill with a mild horizontal stretch (see section 6).
+- Monitors at or below 1080p that aren't a shipped layout size fall back to a clean
+  windowed mode rather than a distorted fullscreen.
+
+---
+
+*Reverse-engineered and built by nosorry. Questions or bug reports: Discord
+**no.sorry**.*

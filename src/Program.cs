@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace AngelsFixRes
@@ -21,6 +22,7 @@ namespace AngelsFixRes
         static readonly Color ACCENT_MINT = ColorTranslator.FromHtml("#8cf5c6");
         static readonly Color ACCENT_AMBER = ColorTranslator.FromHtml("#f8d77a");
         static readonly Color ACCENT_ROSE = ColorTranslator.FromHtml("#ff8ea3");
+        static readonly Color CAUTION_RED = ColorTranslator.FromHtml("#ff4d5e");
         static readonly Color BUTTON_DARK = ColorTranslator.FromHtml("#203653");
         static readonly Color DISCORD_BLURPLE = ColorTranslator.FromHtml("#5865f2");
         static readonly Color DISCORD_BLURPLE_HI = ColorTranslator.FromHtml("#727df3");
@@ -36,20 +38,19 @@ namespace AngelsFixRes
         string gameFolder;
         int nativeW, nativeH;
         Label chip, currentState, statusLabel, banner;
-        ComboBox resoBox;
         Button revertBtn;
+        ShineButton fixBtn;
 
         public MainForm()
         {
             Text = "Angels Online FixRes";
-            ClientSize = new Size(640, 500);
+            ClientSize = new Size(640, 550);
             FormBorderStyle = FormBorderStyle.FixedSingle;   // non-resizable
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = APP_BG;
             Font = Ui(9f);
-            nativeW = Screen.PrimaryScreen.Bounds.Width;
-            nativeH = Screen.PrimaryScreen.Bounds.Height;
+            PhysicalResolution(out nativeW, out nativeH);
             TryLoadIcon();
             BuildUi();
             InitDetect();
@@ -60,6 +61,28 @@ namespace AngelsFixRes
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); return; } catch { }
             try { string ico = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "angel.ico"); if (File.Exists(ico)) Icon = new Icon(ico); } catch { }
         }
+
+        [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport("gdi32.dll")] static extern int GetDeviceCaps(IntPtr hDC, int nIndex);
+        const int DESKTOPVERTRES = 117, DESKTOPHORZRES = 118;
+
+        // The monitor's TRUE physical resolution, correct even when the tool runs DPI-unaware under
+        // Windows display scaling. Screen.Bounds would report the virtualized size (e.g. a 4K screen
+        // at 200% looks like 1920x1080); DESKTOPHORZRES/VERTRES report the real pixels regardless.
+        static void PhysicalResolution(out int w, out int h)
+        {
+            w = 0; h = 0;
+            IntPtr hdc = GetDC(IntPtr.Zero);
+            if (hdc != IntPtr.Zero)
+            {
+                w = GetDeviceCaps(hdc, DESKTOPHORZRES);
+                h = GetDeviceCaps(hdc, DESKTOPVERTRES);
+                ReleaseDC(IntPtr.Zero, hdc);
+            }
+            if (w <= 0 || h <= 0) { w = Screen.PrimaryScreen.Bounds.Width; h = Screen.PrimaryScreen.Bounds.Height; }
+        }
+
 
         // Persist the chosen path in a small file next to THIS exe (per-copy), so a
         // freshly-downloaded exe never inherits another copy's saved path.
@@ -78,22 +101,45 @@ namespace AngelsFixRes
         void BuildUi()
         {
             var body = new Panel { Dock = DockStyle.Fill, BackColor = APP_BG, Padding = new Padding(16, 14, 16, 14) };
-            var card = MakeGlassCard("Render resolution", 156);
+            var card = MakeGlassCard("Render resolution", 116);
             card.Dock = DockStyle.Top;
             currentState = new Label { Left = 14, Top = 40, Width = 588, Height = 40, Font = Semi(9.5f), ForeColor = TEXT_MUTED, BackColor = GLASS_BG, Text = "" };
-            var fixTo = new Label { Left = 14, Top = 92, Width = 70, Height = 24, Text = "Render at:", Font = Ui(10f), ForeColor = TEXT_MAIN, BackColor = GLASS_BG, TextAlign = ContentAlignment.MiddleLeft };
-            resoBox = new ComboBox { Left = 92, Top = 89, Width = 170, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = GLASS_BG_ALT, ForeColor = TEXT_MAIN, Font = Semi(10f) };
-            var hint = new Label { Left = 14, Top = 120, Width = 588, Height = 28, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = GLASS_BG, Text = "Your monitor's native resolution renders 1:1 with no stretch (sharpest, and shows more of the world)." };
-            card.Controls.Add(currentState); card.Controls.Add(fixTo); card.Controls.Add(resoBox); card.Controls.Add(hint);
+            var hint = new Label { Left = 14, Top = 82, Width = 588, Height = 26, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = GLASS_BG, Text = "The tool detects your monitor and applies the sharpest setting for it automatically." };
+            card.Controls.Add(currentState); card.Controls.Add(hint);
             body.Controls.Add(card);
 
+            // The game runs borderless fullscreen and the engine stretches its picture to fill the
+            // whole screen automatically - there is nothing for the player to choose. Non-16:9
+            // screens (ultrawide / 5K2K) get a mild horizontal stretch to reach the sides, so say so.
+            bool widePanel = (nativeW > 1920 || nativeH > 1080) && nativeW * 9 != nativeH * 16;
+            var fillHint = new Label {
+                Left = 16, Top = 140, Width = 608, Height = 46, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
+                Text = "On big screens (4K / 5K / ultrawide) the game runs borderless fullscreen and fills the whole monitor automatically."
+                    + (widePanel ? "\r\nYour screen is wider than 16:9, so the picture is stretched a little at the sides to fill it." : "")
+            };
+            body.Controls.Add(fillHint);
+
             var updateHint = new Label {
-                Left = 16, Top = 184, Width = 500, Height = 60, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
+                Left = 16, Top = 196, Width = 500, Height = 60, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
                 Text = "After a game update, just open this and press Fix UI again.\r\n\r\n" +
                        "Once applied - you do not need to keep the program open, or run it before playing."
             };
-            revertBtn = MakeGlassButton("Revert fix", ACCENT_AMBER); revertBtn.SetBounds(514, 186, 110, 40); revertBtn.Click += OnRevert;
+            revertBtn = MakeGlassButton("Revert fix", ACCENT_AMBER); revertBtn.SetBounds(514, 198, 110, 40); revertBtn.Click += OnRevert;
             body.Controls.Add(updateHint); body.Controls.Add(revertBtn);
+
+            var cautionBox = new Panel { Left = 16, Top = 260, Width = 608, Height = 64, BackColor = APP_BG };
+            cautionBox.Paint += (s, e) => {
+                var g = e.Graphics;
+                using (var pen = new Pen(ACCENT_AMBER)) g.DrawRectangle(pen, 0, 0, cautionBox.Width - 1, cautionBox.Height - 1);
+                using (var bar = new SolidBrush(ACCENT_AMBER)) g.FillRectangle(bar, 0, 0, 4, cautionBox.Height);   // amber accent bar
+            };
+            cautionBox.Controls.Add(new Label {
+                Left = 16, Top = 7, Width = 584, Height = 50, Font = Semi(9f), ForeColor = ACCENT_AMBER, BackColor = APP_BG,
+                Text = "⚠  Heads up: while the fix is active, the in-game Display resolution menu is turned off. The tool " +
+                       "sets how the game fills your screen, so changing it in-game would break that. To change resolution " +
+                       "in-game the normal way again, click Revert fix - it restores the original game."
+            });
+            body.Controls.Add(cautionBox);
 
             // Footer: contact buttons (left), action buttons (right), primary Fix UI emphasised.
             var footer = new Panel { Dock = DockStyle.Bottom, Height = 104, BackColor = APP_BG_ALT };
@@ -102,16 +148,19 @@ namespace AngelsFixRes
             var coffeeBtn = MakeContactButton("☕  Buy me a coffee", KOFI_RED, KOFI_RED_HI); coffeeBtn.SetBounds(172, 56, 156, 40); coffeeBtn.Click += OnCoffee;
             var browseBtn = MakeGlassButton("Browse...", GLASS_BORDER); browseBtn.SetBounds(340, 56, 92, 40); browseBtn.Click += OnBrowse;
             var playBtn = MakeGlassButton("Play", ACCENT_CYAN); playBtn.SetBounds(438, 56, 82, 40); playBtn.Click += OnPlay;
-            var fixBtn = MakePrimaryButton("Fix UI", ACCENT_MINT); fixBtn.SetBounds(526, 56, 98, 40); fixBtn.Click += OnFix;
+            fixBtn = new ShineButton(ACCENT_MINT, ACCENT_CYAN, APP_BG_ALT) { Label = "Fix UI", AccessibleName = "Fix UI", Font = Semi(10f), ForeColor = APP_BG }; fixBtn.SetBounds(526, 56, 98, 40); fixBtn.Click += OnFix;
             footer.Controls.Add(statusLabel); footer.Controls.Add(discordBtn); footer.Controls.Add(coffeeBtn); footer.Controls.Add(browseBtn); footer.Controls.Add(playBtn); footer.Controls.Add(fixBtn);
 
             banner = new Label { Dock = DockStyle.Top, Height = 44, BackColor = ACCENT_ROSE, ForeColor = APP_BG, Font = Semi(9.5f), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(16, 0, 16, 0), Visible = false, Text = "" };
 
             var header = new Panel { Dock = DockStyle.Top, Height = 104, BackColor = APP_BG_ALT };
             header.Controls.Add(new Label { Left = 16, Top = 14, AutoSize = true, Font = Semi(16f), ForeColor = TEXT_MAIN, BackColor = APP_BG_ALT, Text = "Angels Online FixRes" });
-            header.Controls.Add(new Label { Left = 18, Top = 52, AutoSize = true, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG_ALT, Text = "Render the game at your monitor's native resolution - sharp, not stretched." });
+            header.Controls.Add(new Label { Left = 18, Top = 52, AutoSize = true, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG_ALT, Text = "Fill your whole screen sharply - borderless fullscreen, not a blurry stretch." });
             chip = new Label { Left = 18, Top = 74, AutoSize = true, Font = Semi(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG_ALT, Text = "" };
             header.Controls.Add(chip);
+            var changelogBtn = MakeGlassButton("Changelog", ACCENT_CYAN); changelogBtn.SetBounds(516, 14, 108, 30); changelogBtn.Click += (s, e) => ShowChangelog();
+            header.Controls.Add(changelogBtn);
+            header.Controls.Add(new Label { Left = 516, Top = 48, Width = 108, Height = 16, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = APP_BG_ALT, TextAlign = ContentAlignment.TopRight, Text = AppVersion() });
 
             Controls.Add(body); Controls.Add(footer); Controls.Add(banner); Controls.Add(header);
         }
@@ -128,10 +177,31 @@ namespace AngelsFixRes
             return panel;
         }
 
+        // Button that owner-draws its label perfectly centred. The stock flat-button text
+        // can sit a pixel or two off vertically with these fonts; base.OnPaint still draws
+        // the flat background / border / hover, and we draw the (empty-Text) label centred.
+        sealed class CenteredButton : Button
+        {
+            public string Label = "";
+            public CenteredButton() { SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true); }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                TextRenderer.DrawText(e.Graphics, Label, Font, ClientRectangle, ForeColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+            }
+        }
+
+        static CenteredButton NewButton(string text)
+        {
+            return new CenteredButton { Label = text, Text = "", AccessibleName = text, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, UseVisualStyleBackColor = false };
+        }
+
         // Dark glass button (accent shows on hover).
         Button MakeGlassButton(string text, Color accent)
         {
-            var b = new Button { Text = text, FlatStyle = FlatStyle.Flat, BackColor = BUTTON_DARK, ForeColor = TEXT_MAIN, Font = Semi(9.5f), Cursor = Cursors.Hand, UseVisualStyleBackColor = false };
+            var b = NewButton(text); b.BackColor = BUTTON_DARK; b.ForeColor = TEXT_MAIN; b.Font = Semi(9.5f);
             b.FlatAppearance.BorderColor = GLASS_BORDER; b.FlatAppearance.BorderSize = 1;
             b.FlatAppearance.MouseOverBackColor = accent; b.FlatAppearance.MouseDownBackColor = accent;
             b.MouseEnter += (s, e) => b.ForeColor = APP_BG; b.MouseLeave += (s, e) => b.ForeColor = TEXT_MAIN;
@@ -141,7 +211,7 @@ namespace AngelsFixRes
         // Filled accent button for the primary action (stands out).
         Button MakePrimaryButton(string text, Color accent)
         {
-            var b = new Button { Text = text, FlatStyle = FlatStyle.Flat, BackColor = accent, ForeColor = APP_BG, Font = Semi(10f), Cursor = Cursors.Hand, UseVisualStyleBackColor = false };
+            var b = NewButton(text); b.BackColor = accent; b.ForeColor = APP_BG; b.Font = Semi(10f);
             b.FlatAppearance.BorderSize = 0;
             b.FlatAppearance.MouseOverBackColor = ControlPaint.Light(accent, 0.15f);
             b.FlatAppearance.MouseDownBackColor = ControlPaint.Dark(accent, 0.05f);
@@ -151,7 +221,7 @@ namespace AngelsFixRes
         // Filled brand button (Discord / Ko-fi).
         Button MakeContactButton(string text, Color bg, Color hi)
         {
-            var b = new Button { Text = text, FlatStyle = FlatStyle.Flat, BackColor = bg, ForeColor = Color.White, Font = Semi(9f), Cursor = Cursors.Hand, UseVisualStyleBackColor = false };
+            var b = NewButton(text); b.BackColor = bg; b.ForeColor = Color.White; b.Font = Semi(9f);
             b.FlatAppearance.BorderColor = hi; b.FlatAppearance.BorderSize = 1;
             b.FlatAppearance.MouseOverBackColor = hi; b.FlatAppearance.MouseDownBackColor = hi;
             return b;
@@ -159,29 +229,10 @@ namespace AngelsFixRes
 
         void InitDetect()
         {
-            PopulateResolutions();
             string saved = LoadGamePath();
             if (saved != null && GameFiles.IsGameFolder(saved)) gameFolder = saved;
             else { string detected = GameFiles.AutoDetect(AppDomain.CurrentDomain.BaseDirectory); if (detected != null) gameFolder = detected; }
             RefreshStatus();
-        }
-
-        void PopulateResolutions()
-        {
-            // Show the user's real resolution (and common lower options). The
-            // applied render is hard-capped at 1920x1080 in the background
-            // (ApplyRenderFix), since the engine crashes above that - but we do
-            // not hide the user's actual resolution from them.
-            var list = new List<string> { nativeW + "x" + nativeH };
-            int[][] common = { new[] { 2560, 1440 }, new[] { 1920, 1080 }, new[] { 1600, 900 }, new[] { 1366, 768 }, new[] { 1280, 720 } };
-            foreach (var r in common)
-            {
-                string s = r[0] + "x" + r[1];
-                if (r[0] <= nativeW && r[1] <= nativeH && !list.Contains(s)) list.Add(s);
-            }
-            resoBox.Items.Clear();
-            foreach (var s in list) resoBox.Items.Add(s);
-            resoBox.SelectedIndex = 0;
         }
 
         void SetChip(string text, Color color) { chip.Text = "● " + text; chip.ForeColor = color; }
@@ -243,20 +294,14 @@ namespace AngelsFixRes
             return false;
         }
 
-        int[] SelectedRes()
-        {
-            string[] p = ((string)resoBox.SelectedItem).Split('x');
-            return new[] { int.Parse(p[0]), int.Parse(p[1]) };
-        }
-
         void OnFix(object sender, EventArgs e) { DoFix(); }
 
         bool DoFix()
         {
             if (!EnsureFolder()) return false;
-            int[] r = SelectedRes();
-            // Windowed only matters when the monitor itself is above the engine ceiling.
-            bool forceWindowed = nativeW > 1920 || nativeH > 1080;
+            // Plan from the actual monitor: above 1080p -> render 1920x1080 and stretch it to fill
+            // the whole screen; at/below 1080p a non-layout size falls back to a clean window.
+            FixCore.FillPlan plan = FixCore.PlanFill(nativeW, nativeH);
             GameStatus s = GameFiles.Inspect(gameFolder);
             bool locked = GameFiles.DatLocked(gameFolder);
             var reqs = new List<KeyValuePair<string, bool>> {
@@ -269,12 +314,16 @@ namespace AngelsFixRes
                 "Apply the render fix so the game draws its sharpest for your display.",
                 "You can undo it anytime with the Revert fix button.",
             };
-            string summary = "Apply the resolution fix for your " + r[0] + "x" + r[1] + " display. Both files are backed up first, so you can revert anytime.";
+            string summary = "Apply the resolution fix for your " + nativeW + "x" + nativeH + " display. Both files are backed up first, so you can revert anytime.";
             if (!ConfirmAndRun("Apply the resolution fix", summary, steps, reqs, "Apply")) return false;
 
             try
             {
-                ApplyOutcome o = GameFiles.ApplyRenderFix(gameFolder, r[0], r[1], DateTime.Now, forceWindowed);
+                // Fill mode: render at a shipped layout and let the engine stretch it to fill the
+                // whole screen. Non-fillable monitors (odd sizes at/below 1080p) fall back to windowed.
+                ApplyOutcome o = plan.UseFill
+                    ? GameFiles.ApplyFillFix(gameFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH, DateTime.Now)
+                    : GameFiles.ApplyRenderFix(gameFolder, Math.Min(nativeW, 1920), Math.Min(nativeH, 1080), DateTime.Now, nativeW > 1920 || nativeH > 1080);
                 if (!o.Success)
                 {
                     statusLabel.ForeColor = ACCENT_ROSE; statusLabel.Text = o.Message;
@@ -282,7 +331,9 @@ namespace AngelsFixRes
                     return false;
                 }
                 statusLabel.ForeColor = ACCENT_MINT;
-                statusLabel.Text = "Fixed for " + r[0] + "x" + r[1] + ".  Backup: " + Path.GetFileName(o.DatBackup);
+                statusLabel.Text = "Fixed for " + nativeW + "x" + nativeH + "."
+                    + (string.IsNullOrEmpty(o.DatBackup) ? "  (kept existing clean backup)" : "  Backup: " + Path.GetFileName(o.DatBackup));
+                if (fixBtn != null) fixBtn.Flash();
                 RefreshStatus();
                 return true;
             }
@@ -294,15 +345,99 @@ namespace AngelsFixRes
 
         void OnPlay(object sender, EventArgs e)
         {
-            if (!DoFix()) return;
+            if (!EnsureFolder()) return;
+            // If the fix is already applied, launch straight away. If not, warn (and offer to
+            // apply first) - don't silently re-run the whole apply confirmation on every Play.
+            if (!GameFiles.Inspect(gameFolder).Applied)
+            {
+                var r = MessageBox.Show(this,
+                    "The resolution fix isn't applied, so the game will look blurry or stretched.\r\n\r\nApply the fix now before launching?",
+                    "Fix not applied", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+                if (r == DialogResult.Cancel) return;
+                if (r == DialogResult.Yes && !DoFix()) return;   // No -> launch anyway
+            }
+            LaunchGame();
+        }
+
+        void LaunchGame()
+        {
             string launcher = Path.Combine(gameFolder, GameFiles.LauncherName);
             if (!File.Exists(launcher)) { MessageBox.Show(this, "START.EXE was not found in the game folder.", "Launcher missing", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             try
             {
                 Process.Start(new ProcessStartInfo(launcher) { WorkingDirectory = gameFolder, UseShellExecute = true });
-                statusLabel.ForeColor = ACCENT_CYAN; statusLabel.Text = "Launching the game...";
+                // Transient: the game is launched by START.EXE (which then exits), so the tool can't
+                // track it - just show a brief confirmation that clears itself instead of a stuck message.
+                FlashStatus("Game launched - you can close this tool.", ACCENT_CYAN);
             }
             catch (Exception ex) { MessageBox.Show(this, "Could not start the game: " + ex.Message, "Launch failed", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        }
+
+        // Show a status message that clears itself after a few seconds (unless replaced meanwhile).
+        void FlashStatus(string text, Color color, int ms = 6000)
+        {
+            statusLabel.ForeColor = color; statusLabel.Text = text;
+            var t = new System.Windows.Forms.Timer { Interval = ms };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); if (!statusLabel.IsDisposed && statusLabel.Text == text) statusLabel.Text = ""; };
+            t.Start();
+        }
+
+        static string AppVersion()
+        {
+            System.Version v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+            return "v" + v.Major + "." + v.Minor + "." + v.Build;
+        }
+
+        void ShowChangelog()
+        {
+            var dlg = new Form { Text = "Changelog", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, BackColor = APP_BG, ClientSize = new Size(480, 470), Font = Ui(9f) };
+            try { if (Icon != null) dlg.Icon = Icon; } catch { }
+            dlg.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 2, BackColor = ACCENT_CYAN });
+            dlg.Controls.Add(new Label { Left = 20, Top = 16, AutoSize = true, Font = Semi(14f), ForeColor = TEXT_MAIN, Text = "What's new" });
+            dlg.Controls.Add(new Label { Left = 22, Top = 46, AutoSize = true, Font = Ui(9f), ForeColor = TEXT_MUTED, Text = "Angels Online FixRes - changes since v1.0.0" });
+
+            var rtb = new RichTextBox { Left = 16, Top = 74, Width = 448, Height = 340, BackColor = GLASS_BG, ForeColor = TEXT_MAIN, BorderStyle = BorderStyle.None, ReadOnly = true, Font = Ui(9.5f), TabStop = false };
+            dlg.Controls.Add(rtb);
+            ChangelogEntry(rtb, "v1.2.0", "(latest)", new[] {
+                "Fullscreen fill for every big monitor: 4K, 5K, ultrawide and 16:10 screens now all run borderless fullscreen and fill the whole display, instead of some of them playing in a small window in the corner.",
+                "Ultrawide / 21:9 screens fill edge to edge (the game's 16:9 picture is stretched slightly to reach the sides).",
+                "The tool detects your monitor and fills the screen automatically - nothing to pick or tick.",
+                "The game keeps running and rendering while you are tabbed out - no minimizing, no freezing.",
+                "Correct resolution detection and scaling at any Windows display scaling (125%, 150%, 200%), so high-DPI monitors look right.",
+                "While the fix is active, the in-game Display resolution menu is turned off (changing it would fight the tool's setup) - one-click Revert fix restores it.",
+                "Play launches the game straight away when the fix is applied; one-click Revert restores the original game and the normal in-game resolution menu.",
+                "Stability and reliability fixes.",
+            });
+            ChangelogEntry(rtb, "v1.1.0", null, new[] {
+                "Render capped at 1920x1080 for stability (the client is unreliable above it).",
+                "A clean window on monitors larger than 1080p, removing the black bars.",
+                "Detects your real monitor resolution automatically.",
+            });
+            ChangelogEntry(rtb, "v1.0.0", null, new[] {
+                "First release: makes Angels Online render sharper instead of blurry and stretched.",
+            });
+            rtb.SelectionStart = 0; rtb.ScrollToCaret();
+
+            var close = MakePrimaryButton("Close", ACCENT_MINT); close.SetBounds(364, 424, 100, 32); close.Click += (s, e) => dlg.Close();
+            dlg.Controls.Add(close); dlg.AcceptButton = close;
+            dlg.ShowDialog(this);
+        }
+
+        void ChangelogEntry(RichTextBox rtb, string version, string tag, string[] items)
+        {
+            rtb.SelectionIndent = 0; rtb.SelectionHangingIndent = 0;
+            rtb.SelectionFont = Semi(11.5f);
+            rtb.SelectionColor = ACCENT_CYAN;
+            rtb.AppendText(version + (tag != null ? "   " + tag : "") + "\r\n");
+            foreach (string it in items)
+            {
+                rtb.SelectionIndent = 10; rtb.SelectionHangingIndent = 14;   // wrapped lines align under the text
+                rtb.SelectionFont = Ui(9.5f);
+                rtb.SelectionColor = TEXT_MAIN;
+                rtb.AppendText("-  " + it + "\r\n");
+            }
+            rtb.SelectionIndent = 0; rtb.SelectionHangingIndent = 0;
+            rtb.AppendText("\r\n");
         }
 
         void OnCopyDiscord(object sender, EventArgs e)
@@ -339,7 +474,7 @@ namespace AngelsFixRes
         bool ConfirmAndRun(string title, string summary, string[] steps, List<KeyValuePair<string, bool>> requirements, string runLabel)
         {
             bool allMet = requirements.TrueForAll(r => r.Value);
-            var dlg = new Form { Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, BackColor = APP_BG, ClientSize = new Size(480, 360), Font = Ui(9f) };
+            var dlg = new Form { Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, BackColor = APP_BG, ClientSize = new Size(480, 374), Font = Ui(9f) };
             try { if (Icon != null) dlg.Icon = Icon; } catch { }
             dlg.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 2, BackColor = ACCENT_CYAN });
             int y = 18;
@@ -357,12 +492,17 @@ namespace AngelsFixRes
                 y += 22;
             }
             y += 6;
-            dlg.Controls.Add(new Label { Left = 20, Top = y, Width = 440, Height = 34, Font = Ui(9f), ForeColor = allMet ? ACCENT_MINT : ACCENT_AMBER, Text = allMet ? ("All requirements met. Click " + runLabel + " to apply.") : "Heads up: an item is not met, so this may not work. You can still proceed." });
+            dlg.Controls.Add(new Label { Left = 20, Top = y, Width = 448, Height = 20, Font = Ui(9f), ForeColor = allMet ? ACCENT_MINT : ACCENT_AMBER, Text = allMet ? ("All requirements met. Click " + runLabel + " to apply.") : "Heads up: an item is not met, so this may not work. You can still proceed." });
 
             bool proceeded = false;
-            var proceed = MakePrimaryButton(runLabel, allMet ? ACCENT_MINT : ACCENT_AMBER); proceed.SetBounds(360, 316, 100, 34); proceed.Click += (s, e) => { proceeded = true; dlg.Close(); };
-            var cancel = MakeGlassButton("Cancel", GLASS_BORDER); cancel.SetBounds(252, 316, 100, 34); cancel.Click += (s, e) => { proceeded = false; dlg.Close(); };
+            var proceed = allMet
+                ? new ShineButton(ACCENT_MINT, ACCENT_CYAN, APP_BG)
+                : new ShineButton(ACCENT_AMBER, ControlPaint.Dark(ACCENT_AMBER, 0.12f), APP_BG);
+            proceed.Label = runLabel; proceed.AccessibleName = runLabel; proceed.Font = Semi(10f); proceed.ForeColor = APP_BG;
+            proceed.SetBounds(360, 322, 100, 36); proceed.Click += (s, e) => { proceeded = true; dlg.Close(); };
+            var cancel = MakeGlassButton("Cancel", GLASS_BORDER); cancel.SetBounds(252, 322, 100, 36); cancel.Click += (s, e) => { proceeded = false; dlg.Close(); };
             dlg.Controls.Add(proceed); dlg.Controls.Add(cancel);
+            proceed.BringToFront(); cancel.BringToFront();
             dlg.ShowDialog(this);
             return proceeded;
         }

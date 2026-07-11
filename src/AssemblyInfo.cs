@@ -9,8 +9,8 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyProduct("Angels Online FixRes")]          // ProductName
 [assembly: AssemblyCompany("nosorry")]                       // CompanyName
 [assembly: AssemblyCopyright("Copyright (c) 2026 nosorry")]  // LegalCopyright
-[assembly: AssemblyDescription("Fixes blurry rendering, crashes and black bars in Angels Online Global.")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]                   // FileVersion
-[assembly: AssemblyInformationalVersion("1.1.0.0")]          // ProductVersion
+[assembly: AssemblyDescription("Fixes blurry rendering and fills the screen sharp in Angels Online Global.")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]                   // FileVersion
+[assembly: AssemblyInformationalVersion("1.2.0.0")]          // ProductVersion
 [assembly: ComVisible(false)]

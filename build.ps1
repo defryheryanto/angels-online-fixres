@@ -15,6 +15,7 @@ $src  = @(
   (Join-Path $root "src\FixCore.cs"),
   (Join-Path $root "src\GameFiles.cs"),
   (Join-Path $root "src\AssemblyInfo.cs"),
+  (Join-Path $root "src\ShineButton.cs"),
   (Join-Path $root "src\Program.cs")
 )
 & $csc /nologo /target:winexe /codepage:65001 "/out:$out" "/win32icon:$icon" `

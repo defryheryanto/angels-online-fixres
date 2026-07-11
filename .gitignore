@@ -12,3 +12,6 @@ docs/plan.md
 
 # Per-copy saved game path (created at runtime)
 fixres-path.txt
+
+# Local diagnostic tool (dev aid for reverse-engineering, not part of the shipped product)
+diagnostics/

@@ -18,6 +18,15 @@ anything else to install. Download it and run.
 
 ![Angels Online FixRes](assets/ui-preview.png)
 
+## Before and after
+
+The same spot in-game: the stock blurry, low-resolution stretch (before) vs. the
+tool's sharp, full-screen picture (after).
+
+| Before (blurry, low-res stretch) | After (sharp, fills your screen) |
+|:---:|:---:|
+| ![Before](assets/before.png) | ![After](assets/after.png) |
+
 ---
 
 ## Features

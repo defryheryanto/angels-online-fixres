@@ -36,8 +36,9 @@ namespace AngelsFixRes
         static Font Semi(float s) { return new Font("Segoe UI Semibold", s); }
 
         string gameFolder;
-        int nativeW, nativeH;
+        int nativeW, nativeH, windowedW, windowedH;
         Label chip, currentState, statusLabel, banner;
+        ComboBox windowMode;
         Button revertBtn;
         ShineButton fixBtn;
 
@@ -51,6 +52,7 @@ namespace AngelsFixRes
             BackColor = APP_BG;
             Font = Ui(9f);
             PhysicalResolution(out nativeW, out nativeH);
+            WindowedClientSize(nativeW, nativeH, out windowedW, out windowedH);
             TryLoadIcon();
             BuildUi();
             InitDetect();
@@ -83,6 +85,27 @@ namespace AngelsFixRes
             if (w <= 0 || h <= 0) { w = Screen.PrimaryScreen.Bounds.Width; h = Screen.PrimaryScreen.Bounds.Height; }
         }
 
+        // Return a client size whose decorated outer window fits inside the Windows work area.
+        // Screen/SystemInformation values are DPI-virtualized in this legacy .NET application,
+        // so scale them back to the physical pixels used by the HIGHDPIAWARE game client.
+        static void WindowedClientSize(int physicalW, int physicalH, out int w, out int h)
+        {
+            // A normal resizable window has a small invisible resize border outside its painted
+            // frame. Compensate for its bottom edge so the visible frame sits flush with the
+            // taskbar instead of leaving a thin strip of desktop above it.
+            const int InvisibleBottomBorderCompensation = 6;
+            Screen screen = Screen.PrimaryScreen;
+            double sx = screen.Bounds.Width > 0 ? (double)physicalW / screen.Bounds.Width : 1.0;
+            double sy = screen.Bounds.Height > 0 ? (double)physicalH / screen.Bounds.Height : 1.0;
+            int workW = (int)Math.Round(screen.WorkingArea.Width * sx);
+            int workH = (int)Math.Round(screen.WorkingArea.Height * sy);
+            int frameW = (int)Math.Ceiling(SystemInformation.FrameBorderSize.Width * sx) * 2;
+            int frameH = (int)Math.Ceiling(SystemInformation.FrameBorderSize.Height * sy) * 2;
+            int captionH = (int)Math.Ceiling(SystemInformation.CaptionHeight * sy);
+            w = Math.Max(640, workW - frameW);
+            h = Math.Max(480, workH - frameH - captionH + InvisibleBottomBorderCompensation);
+        }
+
 
         // Persist the chosen path in a small file next to THIS exe (per-copy), so a
         // freshly-downloaded exe never inherits another copy's saved path.
@@ -108,13 +131,21 @@ namespace AngelsFixRes
             card.Controls.Add(currentState); card.Controls.Add(hint);
             body.Controls.Add(card);
 
-            // The game runs borderless fullscreen and the engine stretches its picture to fill the
-            // whole screen automatically - there is nothing for the player to choose. Non-16:9
-            // screens (ultrawide / 5K2K) get a mild horizontal stretch to reach the sides, so say so.
+            body.Controls.Add(new Label { Left = 16, Top = 140, Width = 92, Height = 24, Font = Semi(9f), ForeColor = TEXT_MAIN, BackColor = APP_BG, Text = "Window type" });
+            windowMode = new ComboBox {
+                Left = 110, Top = 136, Width = 180, Height = 28, DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = GLASS_BG_ALT, ForeColor = TEXT_MAIN, Font = Ui(9f)
+            };
+            windowMode.Items.Add("borderless-window");
+            windowMode.Items.Add("windowed");
+            windowMode.SelectedIndex = 0;
+            body.Controls.Add(windowMode);
+
+            // Both choices use the same render/UI fix. Only the native Windows window type changes.
             bool widePanel = (nativeW > 1920 || nativeH > 1080) && nativeW * 9 != nativeH * 16;
             var fillHint = new Label {
-                Left = 16, Top = 140, Width = 608, Height = 46, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
-                Text = "On big screens (4K / 5K / ultrawide) the game runs borderless fullscreen and fills the whole monitor automatically."
+                Left = 16, Top = 168, Width = 608, Height = 28, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
+                Text = "Borderless fills the monitor; windowed uses the same sharp UI fix in a regular window."
                     + (widePanel ? "\r\nYour screen is wider than 16:9, so the picture is stretched a little at the sides to fill it." : "")
             };
             body.Controls.Add(fillHint);
@@ -302,6 +333,7 @@ namespace AngelsFixRes
             // Plan from the actual monitor: above 1080p -> render 1920x1080 and stretch it to fill
             // the whole screen; at/below 1080p a non-layout size falls back to a clean window.
             FixCore.FillPlan plan = FixCore.PlanFill(nativeW, nativeH);
+            bool windowed = windowMode != null && windowMode.SelectedIndex == 1;
             GameStatus s = GameFiles.Inspect(gameFolder);
             bool locked = GameFiles.DatLocked(gameFolder);
             var reqs = new List<KeyValuePair<string, bool>> {
@@ -314,16 +346,21 @@ namespace AngelsFixRes
                 "Apply the render fix so the game draws its sharpest for your display.",
                 "You can undo it anytime with the Revert fix button.",
             };
-            string summary = "Apply the resolution fix for your " + nativeW + "x" + nativeH + " display. Both files are backed up first, so you can revert anytime.";
+            string summary = "Apply the resolution fix for your " + nativeW + "x" + nativeH + " display in "
+                + (windowed ? "a regular window" : "borderless-window mode") + ". Both files are backed up first, so you can revert anytime.";
             if (!ConfirmAndRun("Apply the resolution fix", summary, steps, reqs, "Apply")) return false;
 
             try
             {
                 // Fill mode: render at a shipped layout and let the engine stretch it to fill the
                 // whole screen. Non-fillable monitors (odd sizes at/below 1080p) fall back to windowed.
-                ApplyOutcome o = plan.UseFill
-                    ? GameFiles.ApplyFillFix(gameFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH, DateTime.Now)
-                    : GameFiles.ApplyRenderFix(gameFolder, Math.Min(nativeW, 1920), Math.Min(nativeH, 1080), DateTime.Now, nativeW > 1920 || nativeH > 1080);
+                int renderW = plan.UseFill ? plan.RenderW : Math.Min(nativeW, 1920);
+                int renderH = plan.UseFill ? plan.RenderH : Math.Min(nativeH, 1080);
+                ApplyOutcome o = windowed
+                    ? GameFiles.ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, DateTime.Now, true, windowedW, windowedH)
+                    : (plan.UseFill
+                        ? GameFiles.ApplyFillFix(gameFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH, DateTime.Now)
+                        : GameFiles.ApplyRenderFix(gameFolder, renderW, renderH, DateTime.Now, nativeW > 1920 || nativeH > 1080));
                 if (!o.Success)
                 {
                     statusLabel.ForeColor = ACCENT_ROSE; statusLabel.Text = o.Message;

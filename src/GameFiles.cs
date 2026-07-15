@@ -208,6 +208,19 @@ namespace AngelsFixRes
         // takes effect as the window / stretch target).
         public static ApplyOutcome ApplyFillFix(string gameFolder, int renderW, int renderH, int nativeW, int nativeH, DateTime now)
         {
+            return ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, now, false);
+        }
+
+        // Apply the same render/UI fix in either borderless-fullscreen or regular-windowed mode.
+        // Windowed mode deliberately keeps the binary patches identical; only the window target
+        // and GameWndFullScreen setting change, so the game's UI/render layout is unaffected.
+        public static ApplyOutcome ApplyFillFix(string gameFolder, int renderW, int renderH, int nativeW, int nativeH, DateTime now, bool windowed)
+        {
+            return ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, now, windowed, renderW, renderH);
+        }
+
+        public static ApplyOutcome ApplyFillFix(string gameFolder, int renderW, int renderH, int nativeW, int nativeH, DateTime now, bool windowed, int windowedW, int windowedH)
+        {
             var outc = new ApplyOutcome();
             string dat = Path.Combine(gameFolder, DatName);
             string ini = Path.Combine(gameFolder, IniName);
@@ -233,13 +246,17 @@ namespace AngelsFixRes
             if (File.Exists(ini))
             {
                 outc.IniBackup = BackupOnce(ini, wasPatched, stamp);
-                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), nativeW, nativeH, 1);
+                int windowW = windowed ? windowedW : nativeW;
+                int windowH = windowed ? windowedH : nativeH;
+                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), windowW, windowH, windowed ? 0 : 1);
                 File.WriteAllText(ini, fixedIni);
             }
             SetDpiAware(dat, true);   // game renders at physical pixels (crisp) at any Windows scaling
 
             outc.Success = true;
-            outc.Message = "Fill mode (borderless): render " + renderW + "x" + renderH + " stretched to " + nativeW + "x" + nativeH + ".";
+            outc.Message = windowed
+                ? "Windowed mode: render " + renderW + "x" + renderH + " stretched into a " + windowedW + "x" + windowedH + " regular window."
+                : "Fill mode (borderless): render " + renderW + "x" + renderH + " stretched to " + nativeW + "x" + nativeH + ".";
             return outc;
         }
 

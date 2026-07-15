@@ -183,6 +183,15 @@ public static class Tests
             // regression guard: the render-size setter call must stay PRISTINE (the render-freeze
             // latch that crashed the client at boot must never be re-introduced here).
             Check(filled[0x30337D] == 0xE8 && filled[0x30337E] == 0x8E && filled[0x30337F] == 0xEF, "fill: render-size setter call left pristine (no crashing latch)");
+
+            // windowed mode keeps the exact same render patch/UI layout, changing only the INI
+            // window target and fullscreen flag.
+            GameFiles.ApplyFillFix(tmp, 1920, 1080, 3840, 2160, new DateTime(2026, 7, 2, 4, 0, 0), true, 3808, 2018);
+            string iniWindowed = File.ReadAllText(Path.Combine(tmp, "midage.ini"));
+            Check(FixCore.ReadIntKey(iniWindowed, "GameWndSizeWidth") == 3808, "windowed: client width fits the work area");
+            Check(FixCore.ReadIntKey(iniWindowed, "GameWndSizeHeight") == 2018, "windowed: client height leaves room for taskbar and chrome");
+            Check(FixCore.ReadIntKey(iniWindowed, "GameWndFullScreen") == 0, "windowed: fullscreen off");
+            Check(RenderPatch.BorderlessApplied(File.ReadAllBytes(Path.Combine(tmp, "angel.dat"))), "windowed: render/UI patches unchanged");
         }
         finally
         {

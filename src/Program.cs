@@ -66,7 +66,10 @@ namespace AngelsFixRes
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+            int x, int y, int cx, int cy, uint flags);
         const int ENUM_CURRENT_SETTINGS = -1;
+        const uint SWP_NOSIZE = 0x0001, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
 
         [StructLayout(LayoutKind.Sequential)]
         struct POINTL { public int x, y; }
@@ -455,12 +458,12 @@ namespace AngelsFixRes
                 int renderH = plan.UseFill ? plan.RenderH : Math.Min(nativeH, 1080);
                 ApplyOutcome o = windowed
                     ? GameFiles.ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, DateTime.Now, true,
-                        windowedW, windowedH, selectedDisplay.Left, selectedDisplay.Top)
+                        windowedW, windowedH)
                     : (plan.UseFill
                         ? GameFiles.ApplyFillFix(gameFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH,
-                            DateTime.Now, false, plan.RenderW, plan.RenderH, selectedDisplay.Left, selectedDisplay.Top)
+                            DateTime.Now, false, plan.RenderW, plan.RenderH)
                         : GameFiles.ApplyRenderFix(gameFolder, renderW, renderH, DateTime.Now,
-                            nativeW > 1920 || nativeH > 1080, selectedDisplay.Left, selectedDisplay.Top));
+                            nativeW > 1920 || nativeH > 1080));
                 if (!o.Success)
                 {
                     statusLabel.ForeColor = ACCENT_ROSE; statusLabel.Text = o.Message;
@@ -505,11 +508,44 @@ namespace AngelsFixRes
             try
             {
                 Process.Start(new ProcessStartInfo(launcher) { WorkingDirectory = gameFolder, UseShellExecute = true });
-                // Transient: the game is launched by START.EXE (which then exits), so the tool can't
-                // track it - just show a brief confirmation that clears itself instead of a stuck message.
-                FlashStatus("Game launched - you can close this tool.", ACCENT_CYAN);
+                MoveGameToSelectedScreenWhenReady();
+                FlashStatus("Game launched - keep this tool open until the game window appears on Screen "
+                    + selectedDisplay.Number + ".", ACCENT_CYAN);
             }
             catch (Exception ex) { MessageBox.Show(this, "Could not start the game: " + ex.Message, "Launch failed", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        }
+
+        // ScreenLeft/ScreenTop in midage.ini belong to the render surface and must remain zero.
+        // START.EXE launches angel.dat as a child process, so wait for that real window and move
+        // it using desktop coordinates. Repeating briefly handles the game's late startup layout.
+        void MoveGameToSelectedScreenWhenReady()
+        {
+            int attempts = 0, movesAfterFound = 0;
+            var timer = new System.Windows.Forms.Timer { Interval = 250 };
+            timer.Tick += (s, e) =>
+            {
+                attempts++;
+                bool moved = false;
+                foreach (Process process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(GameFiles.DatName)))
+                {
+                    try
+                    {
+                        process.Refresh();
+                        if (process.MainWindowHandle == IntPtr.Zero) continue;
+                        moved = SetWindowPos(process.MainWindowHandle, IntPtr.Zero, selectedDisplay.Left,
+                            selectedDisplay.Top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) || moved;
+                    }
+                    catch { }
+                    finally { process.Dispose(); }
+                }
+                if (moved) movesAfterFound++;
+                if (attempts >= 240 || movesAfterFound >= 20)
+                {
+                    timer.Stop(); timer.Dispose();
+                    if (moved) FlashStatus("Game moved to Screen " + selectedDisplay.Number + ".", ACCENT_MINT);
+                }
+            };
+            timer.Start();
         }
 
         // Show a status message that clears itself after a few seconds (unless replaced meanwhile).

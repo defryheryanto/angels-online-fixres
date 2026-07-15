@@ -110,6 +110,7 @@ namespace AngelsFixRes
         // Persist the chosen path in a small file next to THIS exe (per-copy), so a
         // freshly-downloaded exe never inherits another copy's saved path.
         static string ConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-path.txt"); }
+        static string WindowModeConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-window-mode.txt"); }
 
         void SaveGamePath(string path)
         {
@@ -119,6 +120,22 @@ namespace AngelsFixRes
         string LoadGamePath()
         {
             try { return File.Exists(ConfigPath()) ? File.ReadAllText(ConfigPath()).Trim() : null; } catch { return null; }
+        }
+
+        void SaveWindowMode(string mode)
+        {
+            try { File.WriteAllText(WindowModeConfigPath(), mode); } catch { }
+        }
+
+        string LoadWindowMode()
+        {
+            try
+            {
+                if (!File.Exists(WindowModeConfigPath())) return "borderless-window";
+                string mode = File.ReadAllText(WindowModeConfigPath()).Trim();
+                return mode == "windowed" ? "windowed" : "borderless-window";
+            }
+            catch { return "borderless-window"; }
         }
 
         void BuildUi()
@@ -138,7 +155,7 @@ namespace AngelsFixRes
             };
             windowMode.Items.Add("borderless-window");
             windowMode.Items.Add("windowed");
-            windowMode.SelectedIndex = 0;
+            windowMode.SelectedItem = LoadWindowMode();
             body.Controls.Add(windowMode);
 
             // Both choices use the same render/UI fix. Only the native Windows window type changes.
@@ -186,7 +203,7 @@ namespace AngelsFixRes
 
             var header = new Panel { Dock = DockStyle.Top, Height = 104, BackColor = APP_BG_ALT };
             header.Controls.Add(new Label { Left = 16, Top = 14, AutoSize = true, Font = Semi(16f), ForeColor = TEXT_MAIN, BackColor = APP_BG_ALT, Text = "Angels Online FixRes" });
-            header.Controls.Add(new Label { Left = 18, Top = 52, AutoSize = true, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG_ALT, Text = "Fill your whole screen sharply - borderless fullscreen, not a blurry stretch." });
+            header.Controls.Add(new Label { Left = 18, Top = 52, AutoSize = true, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG_ALT, Text = "Fill your whole screen sharply - not a blurry stretch, you can change the window mode." });
             chip = new Label { Left = 18, Top = 74, AutoSize = true, Font = Semi(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG_ALT, Text = "" };
             header.Controls.Add(chip);
             var changelogBtn = MakeGlassButton("Changelog", ACCENT_CYAN); changelogBtn.SetBounds(516, 14, 108, 30); changelogBtn.Click += (s, e) => ShowChangelog();
@@ -288,7 +305,8 @@ namespace AngelsFixRes
             bool highRes = nativeW > 1920 || nativeH > 1080;
             if (s.Applied)
             {
-                currentState.Text = "Fix is active - the game renders sharp for your " + nativeW + "x" + nativeH + " display.";
+                currentState.Text = "Fix is active - the game renders sharp for your " + nativeW + "x" + nativeH
+                    + " display in " + LoadWindowMode() + " mode.";
                 currentState.ForeColor = ACCENT_MINT;
             }
             else
@@ -370,6 +388,7 @@ namespace AngelsFixRes
                 statusLabel.ForeColor = ACCENT_MINT;
                 statusLabel.Text = "Fixed for " + nativeW + "x" + nativeH + "."
                     + (string.IsNullOrEmpty(o.DatBackup) ? "  (kept existing clean backup)" : "  Backup: " + Path.GetFileName(o.DatBackup));
+                SaveWindowMode(windowed ? "windowed" : "borderless-window");
                 if (fixBtn != null) fixBtn.Flash();
                 RefreshStatus();
                 return true;

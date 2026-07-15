@@ -28,6 +28,9 @@ public static class Tests
         Check(FixCore.ReadIntKey(w, "GameWndFullScreen") == 0, "ini forces windowed when asked");
         string fs = FixCore.ApplyResolution(Sample, 3840, 2160, 1);
         Check(FixCore.ReadIntKey(fs, "GameWndFullScreen") == 1, "ini forces fullscreen when asked");
+        string secondScreen = FixCore.ApplyResolution(Sample, 2560, 1440, 1, 1920, -120);
+        Check(FixCore.ReadIntKey(secondScreen, "ScreenLeft") == 1920, "ini targets selected screen left");
+        Check(FixCore.ReadIntKey(secondScreen, "ScreenTop") == -120, "ini targets selected screen top");
     }
 
     static void TestPlanFill()

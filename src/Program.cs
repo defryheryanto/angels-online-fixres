@@ -37,22 +37,23 @@ namespace AngelsFixRes
 
         string gameFolder;
         int nativeW, nativeH, windowedW, windowedH;
+        DisplayInfo selectedDisplay;
         Label chip, currentState, statusLabel, banner;
-        ComboBox windowMode;
+        ComboBox windowMode, screenOption;
         Button revertBtn;
         ShineButton fixBtn;
 
         public MainForm()
         {
             Text = "Angels Online FixRes";
-            ClientSize = new Size(640, 550);
+            ClientSize = new Size(640, 582);
             FormBorderStyle = FormBorderStyle.FixedSingle;   // non-resizable
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = APP_BG;
             Font = Ui(9f);
-            PhysicalResolution(out nativeW, out nativeH);
-            WindowedClientSize(nativeW, nativeH, out windowedW, out windowedH);
+            selectedDisplay = LoadSelectedDisplay();
+            ApplySelectedDisplay();
             TryLoadIcon();
             BuildUi();
             InitDetect();
@@ -64,37 +65,67 @@ namespace AngelsFixRes
             try { string ico = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "angel.ico"); if (File.Exists(ico)) Icon = new Icon(ico); } catch { }
         }
 
-        [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
-        [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-        [DllImport("gdi32.dll")] static extern int GetDeviceCaps(IntPtr hDC, int nIndex);
-        const int DESKTOPVERTRES = 117, DESKTOPHORZRES = 118;
+        [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+        const int ENUM_CURRENT_SETTINGS = -1;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct POINTL { public int x, y; }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        struct DEVMODE
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+            public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+            public int dmFields;
+            public POINTL dmPosition;
+            public int dmDisplayOrientation, dmDisplayFixedOutput;
+            public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+            public short dmLogPixels;
+            public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
+            public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2;
+            public int dmPanningWidth, dmPanningHeight;
+        }
+
+        sealed class DisplayInfo
+        {
+            public Screen Screen;
+            public int Number, Width, Height, Left, Top;
+            public override string ToString()
+            {
+                return "Screen " + Number + " - " + Width + "x" + Height
+                    + (Screen.Primary ? " (Primary)" : "");
+            }
+        }
 
         // The monitor's TRUE physical resolution, correct even when the tool runs DPI-unaware under
         // Windows display scaling. Screen.Bounds would report the virtualized size (e.g. a 4K screen
         // at 200% looks like 1920x1080); DESKTOPHORZRES/VERTRES report the real pixels regardless.
-        static void PhysicalResolution(out int w, out int h)
+        static DisplayInfo GetDisplayInfo(Screen screen, int number)
         {
-            w = 0; h = 0;
-            IntPtr hdc = GetDC(IntPtr.Zero);
-            if (hdc != IntPtr.Zero)
+            var info = new DisplayInfo { Screen = screen, Number = number, Width = screen.Bounds.Width, Height = screen.Bounds.Height,
+                Left = screen.Bounds.Left, Top = screen.Bounds.Top };
+            var mode = new DEVMODE();
+            mode.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+            if (EnumDisplaySettings(screen.DeviceName, ENUM_CURRENT_SETTINGS, ref mode))
             {
-                w = GetDeviceCaps(hdc, DESKTOPHORZRES);
-                h = GetDeviceCaps(hdc, DESKTOPVERTRES);
-                ReleaseDC(IntPtr.Zero, hdc);
+                info.Width = mode.dmPelsWidth; info.Height = mode.dmPelsHeight;
+                info.Left = mode.dmPosition.x; info.Top = mode.dmPosition.y;
             }
-            if (w <= 0 || h <= 0) { w = Screen.PrimaryScreen.Bounds.Width; h = Screen.PrimaryScreen.Bounds.Height; }
+            return info;
         }
 
         // Return a client size whose decorated outer window fits inside the Windows work area.
         // Screen/SystemInformation values are DPI-virtualized in this legacy .NET application,
         // so scale them back to the physical pixels used by the HIGHDPIAWARE game client.
-        static void WindowedClientSize(int physicalW, int physicalH, out int w, out int h)
+        static void WindowedClientSize(DisplayInfo display, out int w, out int h)
         {
             // A normal resizable window has a small invisible resize border outside its painted
             // frame. Compensate for its bottom edge so the visible frame sits flush with the
             // taskbar instead of leaving a thin strip of desktop above it.
             const int InvisibleBottomBorderCompensation = 6;
-            Screen screen = Screen.PrimaryScreen;
+            Screen screen = display.Screen;
+            int physicalW = display.Width, physicalH = display.Height;
             double sx = screen.Bounds.Width > 0 ? (double)physicalW / screen.Bounds.Width : 1.0;
             double sy = screen.Bounds.Height > 0 ? (double)physicalH / screen.Bounds.Height : 1.0;
             int workW = (int)Math.Round(screen.WorkingArea.Width * sx);
@@ -111,6 +142,30 @@ namespace AngelsFixRes
         // freshly-downloaded exe never inherits another copy's saved path.
         static string ConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-path.txt"); }
         static string WindowModeConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-window-mode.txt"); }
+        static string ScreenConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-screen.txt"); }
+
+        DisplayInfo LoadSelectedDisplay()
+        {
+            string saved = null;
+            try { if (File.Exists(ScreenConfigPath())) saved = File.ReadAllText(ScreenConfigPath()).Trim(); } catch { }
+            Screen[] screens = Screen.AllScreens;
+            for (int i = 0; i < screens.Length; i++)
+                if (screens[i].DeviceName == saved) return GetDisplayInfo(screens[i], i + 1);
+            for (int i = 0; i < screens.Length; i++)
+                if (screens[i].Primary) return GetDisplayInfo(screens[i], i + 1);
+            return GetDisplayInfo(Screen.PrimaryScreen, 1);
+        }
+
+        void ApplySelectedDisplay()
+        {
+            nativeW = selectedDisplay.Width; nativeH = selectedDisplay.Height;
+            WindowedClientSize(selectedDisplay, out windowedW, out windowedH);
+        }
+
+        void SaveSelectedDisplay()
+        {
+            try { File.WriteAllText(ScreenConfigPath(), selectedDisplay.Screen.DeviceName); } catch { }
+        }
 
         void SaveGamePath(string path)
         {
@@ -158,24 +213,39 @@ namespace AngelsFixRes
             windowMode.SelectedItem = LoadWindowMode();
             body.Controls.Add(windowMode);
 
+            body.Controls.Add(new Label { Left = 16, Top = 172, Width = 92, Height = 24, Font = Semi(9f), ForeColor = TEXT_MAIN, BackColor = APP_BG, Text = "Screen" });
+            screenOption = new ComboBox {
+                Left = 110, Top = 168, Width = 300, Height = 28, DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = GLASS_BG_ALT, ForeColor = TEXT_MAIN, Font = Ui(9f)
+            };
+            Screen[] screens = Screen.AllScreens;
+            for (int i = 0; i < screens.Length; i++)
+            {
+                DisplayInfo display = GetDisplayInfo(screens[i], i + 1);
+                screenOption.Items.Add(display);
+                if (display.Screen.DeviceName == selectedDisplay.Screen.DeviceName) screenOption.SelectedItem = display;
+            }
+            screenOption.SelectedIndexChanged += OnScreenChanged;
+            body.Controls.Add(screenOption);
+
             // Both choices use the same render/UI fix. Only the native Windows window type changes.
             bool widePanel = (nativeW > 1920 || nativeH > 1080) && nativeW * 9 != nativeH * 16;
             var fillHint = new Label {
-                Left = 16, Top = 168, Width = 608, Height = 28, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
+                Left = 16, Top = 200, Width = 608, Height = 28, Font = Ui(8.5f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
                 Text = "Borderless fills the monitor; windowed uses the same sharp UI fix in a regular window."
                     + (widePanel ? "\r\nYour screen is wider than 16:9, so the picture is stretched a little at the sides to fill it." : "")
             };
             body.Controls.Add(fillHint);
 
             var updateHint = new Label {
-                Left = 16, Top = 196, Width = 500, Height = 60, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
+                Left = 16, Top = 228, Width = 500, Height = 60, Font = Ui(9f), ForeColor = TEXT_MUTED, BackColor = APP_BG,
                 Text = "After a game update, just open this and press Fix UI again.\r\n\r\n" +
                        "Once applied - you do not need to keep the program open, or run it before playing."
             };
-            revertBtn = MakeGlassButton("Revert fix", ACCENT_AMBER); revertBtn.SetBounds(514, 198, 110, 40); revertBtn.Click += OnRevert;
+            revertBtn = MakeGlassButton("Revert fix", ACCENT_AMBER); revertBtn.SetBounds(514, 230, 110, 40); revertBtn.Click += OnRevert;
             body.Controls.Add(updateHint); body.Controls.Add(revertBtn);
 
-            var cautionBox = new Panel { Left = 16, Top = 260, Width = 608, Height = 64, BackColor = APP_BG };
+            var cautionBox = new Panel { Left = 16, Top = 292, Width = 608, Height = 64, BackColor = APP_BG };
             cautionBox.Paint += (s, e) => {
                 var g = e.Graphics;
                 using (var pen = new Pen(ACCENT_AMBER)) g.DrawRectangle(pen, 0, 0, cautionBox.Width - 1, cautionBox.Height - 1);
@@ -283,6 +353,15 @@ namespace AngelsFixRes
             RefreshStatus();
         }
 
+        void OnScreenChanged(object sender, EventArgs e)
+        {
+            DisplayInfo display = screenOption.SelectedItem as DisplayInfo;
+            if (display == null) return;
+            selectedDisplay = display;
+            ApplySelectedDisplay();
+            RefreshStatus();
+        }
+
         void SetChip(string text, Color color) { chip.Text = "● " + text; chip.ForeColor = color; }
 
         void RefreshStatus()
@@ -306,7 +385,7 @@ namespace AngelsFixRes
             if (s.Applied)
             {
                 currentState.Text = "Fix is active - the game renders sharp for your " + nativeW + "x" + nativeH
-                    + " display in " + LoadWindowMode() + " mode.";
+                    + " display in " + LoadWindowMode() + " mode on Screen " + selectedDisplay.Number + ".";
                 currentState.ForeColor = ACCENT_MINT;
             }
             else
@@ -364,7 +443,7 @@ namespace AngelsFixRes
                 "Apply the render fix so the game draws its sharpest for your display.",
                 "You can undo it anytime with the Revert fix button.",
             };
-            string summary = "Apply the resolution fix for your " + nativeW + "x" + nativeH + " display in "
+            string summary = "Apply the resolution fix for Screen " + selectedDisplay.Number + " (" + nativeW + "x" + nativeH + ") in "
                 + (windowed ? "a regular window" : "borderless-window mode") + ". Both files are backed up first, so you can revert anytime.";
             if (!ConfirmAndRun("Apply the resolution fix", summary, steps, reqs, "Apply")) return false;
 
@@ -375,10 +454,13 @@ namespace AngelsFixRes
                 int renderW = plan.UseFill ? plan.RenderW : Math.Min(nativeW, 1920);
                 int renderH = plan.UseFill ? plan.RenderH : Math.Min(nativeH, 1080);
                 ApplyOutcome o = windowed
-                    ? GameFiles.ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, DateTime.Now, true, windowedW, windowedH)
+                    ? GameFiles.ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, DateTime.Now, true,
+                        windowedW, windowedH, selectedDisplay.Left, selectedDisplay.Top)
                     : (plan.UseFill
-                        ? GameFiles.ApplyFillFix(gameFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH, DateTime.Now)
-                        : GameFiles.ApplyRenderFix(gameFolder, renderW, renderH, DateTime.Now, nativeW > 1920 || nativeH > 1080));
+                        ? GameFiles.ApplyFillFix(gameFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH,
+                            DateTime.Now, false, plan.RenderW, plan.RenderH, selectedDisplay.Left, selectedDisplay.Top)
+                        : GameFiles.ApplyRenderFix(gameFolder, renderW, renderH, DateTime.Now,
+                            nativeW > 1920 || nativeH > 1080, selectedDisplay.Left, selectedDisplay.Top));
                 if (!o.Success)
                 {
                     statusLabel.ForeColor = ACCENT_ROSE; statusLabel.Text = o.Message;
@@ -389,6 +471,7 @@ namespace AngelsFixRes
                 statusLabel.Text = "Fixed for " + nativeW + "x" + nativeH + "."
                     + (string.IsNullOrEmpty(o.DatBackup) ? "  (kept existing clean backup)" : "  Backup: " + Path.GetFileName(o.DatBackup));
                 SaveWindowMode(windowed ? "windowed" : "borderless-window");
+                SaveSelectedDisplay();
                 if (fixBtn != null) fixBtn.Flash();
                 RefreshStatus();
                 return true;

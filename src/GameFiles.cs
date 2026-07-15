@@ -158,7 +158,8 @@ namespace AngelsFixRes
         }
 
         // Back up both files, patch angel.dat for WxH, and set midage.ini.
-        public static ApplyOutcome ApplyRenderFix(string gameFolder, int width, int height, DateTime now, bool forceWindowed = false)
+        public static ApplyOutcome ApplyRenderFix(string gameFolder, int width, int height, DateTime now,
+            bool forceWindowed = false, int screenLeft = 0, int screenTop = 0)
         {
             var outc = new ApplyOutcome();
             // Windowed fallback (non-16:9 monitors, or a fill render that is not a supported layout):
@@ -190,7 +191,8 @@ namespace AngelsFixRes
             if (File.Exists(ini))
             {
                 outc.IniBackup = BackupOnce(ini, wasPatched, stamp);
-                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), width, height, forceWindowed ? (int?)0 : null);
+                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), width, height,
+                    forceWindowed ? (int?)0 : null, screenLeft, screenTop);
                 File.WriteAllText(ini, fixedIni);
             }
             SetDpiAware(dat, true);   // game renders at physical pixels (crisp) at any Windows scaling
@@ -219,7 +221,8 @@ namespace AngelsFixRes
             return ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, now, windowed, renderW, renderH);
         }
 
-        public static ApplyOutcome ApplyFillFix(string gameFolder, int renderW, int renderH, int nativeW, int nativeH, DateTime now, bool windowed, int windowedW, int windowedH)
+        public static ApplyOutcome ApplyFillFix(string gameFolder, int renderW, int renderH, int nativeW, int nativeH,
+            DateTime now, bool windowed, int windowedW, int windowedH, int screenLeft = 0, int screenTop = 0)
         {
             var outc = new ApplyOutcome();
             string dat = Path.Combine(gameFolder, DatName);
@@ -248,7 +251,8 @@ namespace AngelsFixRes
                 outc.IniBackup = BackupOnce(ini, wasPatched, stamp);
                 int windowW = windowed ? windowedW : nativeW;
                 int windowH = windowed ? windowedH : nativeH;
-                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), windowW, windowH, windowed ? 0 : 1);
+                string fixedIni = FixCore.ApplyResolution(File.ReadAllText(ini), windowW, windowH,
+                    windowed ? 0 : 1, screenLeft, screenTop);
                 File.WriteAllText(ini, fixedIni);
             }
             SetDpiAware(dat, true);   // game renders at physical pixels (crisp) at any Windows scaling

@@ -113,18 +113,18 @@ namespace AngelsFixRes
 
         private static readonly string[] WidthKeys = { "GameWndSizeWidth", "ScreenWidth" };
         private static readonly string[] HeightKeys = { "GameWndSizeHeight", "ScreenHeight" };
-        private static readonly string[] ZeroKeys = { "ScreenLeft", "ScreenTop" };
-
         // Set the resolution keys to the target, preserving every other line.
         // Missing keys are inserted immediately after the [OPTION] header. When
         // gameWndFullScreen is non-null the GameWndFullScreen key is set to it
         // (0 = windowed, 1 = fullscreen).
-        public static string ApplyResolution(string iniText, int width, int height, int? gameWndFullScreen = null)
+        public static string ApplyResolution(string iniText, int width, int height, int? gameWndFullScreen = null,
+            int screenLeft = 0, int screenTop = 0)
         {
             var targets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (string k in WidthKeys) targets[k] = width;
             foreach (string k in HeightKeys) targets[k] = height;
-            foreach (string k in ZeroKeys) targets[k] = 0;
+            targets["ScreenLeft"] = screenLeft;
+            targets["ScreenTop"] = screenTop;
             // Optionally pin the window mode. Windowed (0) keeps the window at the
             // 1920x1080 draw region (v1.1 fallback). Fullscreen (1) is used by fill
             // mode: the window is the native monitor size while the render underneath

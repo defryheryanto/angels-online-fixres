@@ -72,6 +72,40 @@ namespace AngelsFixRes
             catch (UnauthorizedAccessException) { return true; }
         }
 
+        // Create a physically independent client tree for one launch. Files are copied (never
+        // hard-linked), so patching this instance cannot alter the installation or another client.
+        // A unique directory also isolates files the legacy client may write while it is running.
+        public static string CreateClientSandbox(string sourceFolder, string sandboxRoot, string profile)
+        {
+            if (!IsGameFolder(sourceFolder)) throw new IOException("Source is not an Angels Online game folder.");
+            string source = Path.GetFullPath(sourceFolder).TrimEnd(Path.DirectorySeparatorChar);
+            string root = Path.GetFullPath(sandboxRoot).TrimEnd(Path.DirectorySeparatorChar);
+            if (root.Equals(source, StringComparison.OrdinalIgnoreCase) ||
+                root.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("The client sandbox must be outside the game installation.");
+            foreach (char c in Path.GetInvalidFileNameChars()) profile = profile.Replace(c, '_');
+            string target = Path.Combine(root, profile);
+            if (Directory.Exists(target)) throw new IOException("Client sandbox already exists: " + target);
+            Directory.CreateDirectory(target);
+            try
+            {
+                foreach (string dir in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+                    Directory.CreateDirectory(Path.Combine(target, dir.Substring(source.Length).TrimStart(Path.DirectorySeparatorChar)));
+                foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+                {
+                    if (file.EndsWith(BakSuffix, StringComparison.OrdinalIgnoreCase)) continue;
+                    string relative = file.Substring(source.Length).TrimStart(Path.DirectorySeparatorChar);
+                    File.Copy(file, Path.Combine(target, relative), false);
+                }
+                return target;
+            }
+            catch
+            {
+                try { Directory.Delete(target, true); } catch { }
+                throw;
+            }
+        }
+
         // Newest FixRes backup for a given base file (by the timestamp in the name).
         public static string LatestBackup(string folder, string baseName)
         {

@@ -36,6 +36,8 @@ namespace AngelsFixRes
         static Font Semi(float s) { return new Font("Segoe UI Semibold", s); }
 
         string gameFolder;
+        string preparedGameFolder;
+        string preparedKey;
         int nativeW, nativeH, windowedW, windowedH;
         DisplayInfo selectedDisplay;
         Label chip, currentState, statusLabel, banner;
@@ -362,6 +364,7 @@ namespace AngelsFixRes
             if (display == null) return;
             selectedDisplay = display;
             ApplySelectedDisplay();
+            preparedGameFolder = null; preparedKey = null;
             RefreshStatus();
         }
 
@@ -387,8 +390,8 @@ namespace AngelsFixRes
             bool highRes = nativeW > 1920 || nativeH > 1080;
             if (s.Applied)
             {
-                currentState.Text = "Fix is active - the game renders sharp for your " + nativeW + "x" + nativeH
-                    + " display in " + LoadWindowMode() + " mode on Screen " + selectedDisplay.Number + ".";
+                currentState.Text = "Source client is compatible. Fix UI prepares a separate client for Screen "
+                    + selectedDisplay.Number + " (" + nativeW + "x" + nativeH + ").";
                 currentState.ForeColor = ACCENT_MINT;
             }
             else
@@ -442,27 +445,31 @@ namespace AngelsFixRes
                 new KeyValuePair<string, bool>("Angels Online is closed", !locked),
             };
             var steps = new[] {
-                "Back up angel.dat and midage.ini (timestamped .bak).",
-                "Apply the render fix so the game draws its sharpest for your display.",
-                "You can undo it anytime with the Revert fix button.",
+                "Copy the game into a new, isolated client sandbox.",
+                "Apply the selected screen's render settings only to that copy.",
+                "Leave the game installation and running clients unchanged.",
             };
-            string summary = "Apply the resolution fix for Screen " + selectedDisplay.Number + " (" + nativeW + "x" + nativeH + ") in "
-                + (windowed ? "a regular window" : "borderless-window mode") + ". Both files are backed up first, so you can revert anytime.";
+            string summary = "Prepare the next client for Screen " + selectedDisplay.Number + " (" + nativeW + "x" + nativeH + ") in "
+                + (windowed ? "a regular window" : "borderless-window mode") + ". The installed game and clients already running are not modified.";
             if (!ConfirmAndRun("Apply the resolution fix", summary, steps, reqs, "Apply")) return false;
 
             try
             {
+                string sandboxRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "AngelsOnlineFixRes", "clients");
+                string profile = "client-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-screen" + selectedDisplay.Number;
+                string targetFolder = GameFiles.CreateClientSandbox(gameFolder, sandboxRoot, profile);
                 // Fill mode: render at a shipped layout and let the engine stretch it to fill the
                 // whole screen. Non-fillable monitors (odd sizes at/below 1080p) fall back to windowed.
                 int renderW = plan.UseFill ? plan.RenderW : Math.Min(nativeW, 1920);
                 int renderH = plan.UseFill ? plan.RenderH : Math.Min(nativeH, 1080);
                 ApplyOutcome o = windowed
-                    ? GameFiles.ApplyFillFix(gameFolder, renderW, renderH, nativeW, nativeH, DateTime.Now, true,
+                    ? GameFiles.ApplyFillFix(targetFolder, renderW, renderH, nativeW, nativeH, DateTime.Now, true,
                         windowedW, windowedH)
                     : (plan.UseFill
-                        ? GameFiles.ApplyFillFix(gameFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH,
+                        ? GameFiles.ApplyFillFix(targetFolder, plan.RenderW, plan.RenderH, plan.NativeW, plan.NativeH,
                             DateTime.Now, false, plan.RenderW, plan.RenderH)
-                        : GameFiles.ApplyRenderFix(gameFolder, renderW, renderH, DateTime.Now,
+                        : GameFiles.ApplyRenderFix(targetFolder, renderW, renderH, DateTime.Now,
                             nativeW > 1920 || nativeH > 1080));
                 if (!o.Success)
                 {
@@ -470,9 +477,10 @@ namespace AngelsFixRes
                     MessageBox.Show(this, o.Message, "Not applied", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
+                preparedGameFolder = targetFolder;
+                preparedKey = selectedDisplay.Screen.DeviceName + "|" + (windowed ? "windowed" : "borderless");
                 statusLabel.ForeColor = ACCENT_MINT;
-                statusLabel.Text = "Fixed for " + nativeW + "x" + nativeH + "."
-                    + (string.IsNullOrEmpty(o.DatBackup) ? "  (kept existing clean backup)" : "  Backup: " + Path.GetFileName(o.DatBackup));
+                statusLabel.Text = "Next client prepared for Screen " + selectedDisplay.Number + ". Press Play to start it.";
                 SaveWindowMode(windowed ? "windowed" : "borderless-window");
                 SaveSelectedDisplay();
                 if (fixBtn != null) fixBtn.Flash();
@@ -488,27 +496,25 @@ namespace AngelsFixRes
         void OnPlay(object sender, EventArgs e)
         {
             if (!EnsureFolder()) return;
-            // If the fix is already applied, launch straight away. If not, warn (and offer to
-            // apply first) - don't silently re-run the whole apply confirmation on every Play.
-            if (!GameFiles.Inspect(gameFolder).Applied)
-            {
-                var r = MessageBox.Show(this,
-                    "The resolution fix isn't applied, so the game will look blurry or stretched.\r\n\r\nApply the fix now before launching?",
-                    "Fix not applied", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
-                if (r == DialogResult.Cancel) return;
-                if (r == DialogResult.Yes && !DoFix()) return;   // No -> launch anyway
-            }
+            bool windowed = windowMode != null && windowMode.SelectedIndex == 1;
+            string key = selectedDisplay.Screen.DeviceName + "|" + (windowed ? "windowed" : "borderless");
+            if (preparedGameFolder == null || preparedKey != key || !GameFiles.IsGameFolder(preparedGameFolder))
+            { MessageBox.Show(this, "Press Fix UI to prepare the next isolated client for this screen first.", "Client not prepared", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             LaunchGame();
         }
 
         void LaunchGame()
         {
-            string launcher = Path.Combine(gameFolder, GameFiles.LauncherName);
+            string launchFolder = preparedGameFolder;
+            string launcher = Path.Combine(launchFolder, GameFiles.LauncherName);
             if (!File.Exists(launcher)) { MessageBox.Show(this, "START.EXE was not found in the game folder.", "Launcher missing", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             try
             {
-                Process.Start(new ProcessStartInfo(launcher) { WorkingDirectory = gameFolder, UseShellExecute = true });
-                MoveGameToSelectedScreenWhenReady();
+                var existing = new HashSet<int>();
+                foreach (Process p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(GameFiles.DatName))) { existing.Add(p.Id); p.Dispose(); }
+                Process.Start(new ProcessStartInfo(launcher) { WorkingDirectory = launchFolder, UseShellExecute = true });
+                MoveGameToSelectedScreenWhenReady(existing);
+                preparedGameFolder = null; preparedKey = null;
                 FlashStatus("Game launched - keep this tool open until the game window appears on Screen "
                     + selectedDisplay.Number + ".", ACCENT_CYAN);
             }
@@ -518,7 +524,7 @@ namespace AngelsFixRes
         // ScreenLeft/ScreenTop in midage.ini belong to the render surface and must remain zero.
         // START.EXE launches angel.dat as a child process, so wait for that real window and move
         // it using desktop coordinates. Repeating briefly handles the game's late startup layout.
-        void MoveGameToSelectedScreenWhenReady()
+        void MoveGameToSelectedScreenWhenReady(HashSet<int> existingProcessIds)
         {
             int attempts = 0, movesAfterFound = 0;
             var timer = new System.Windows.Forms.Timer { Interval = 250 };
@@ -530,6 +536,7 @@ namespace AngelsFixRes
                 {
                     try
                     {
+                        if (existingProcessIds.Contains(process.Id)) continue;
                         process.Refresh();
                         if (process.MainWindowHandle == IntPtr.Zero) continue;
                         moved = SetWindowPos(process.MainWindowHandle, IntPtr.Zero, selectedDisplay.Left,

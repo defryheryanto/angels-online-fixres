@@ -95,7 +95,14 @@ namespace AngelsFixRes
                 {
                     if (file.EndsWith(BakSuffix, StringComparison.OrdinalIgnoreCase)) continue;
                     string relative = file.Substring(source.Length).TrimStart(Path.DirectorySeparatorChar);
-                    File.Copy(file, Path.Combine(target, relative), false);
+                    string destination = Path.Combine(target, relative);
+                    File.Copy(file, destination, false);
+                    // File.Copy preserves the source attributes. Some distributions mark client
+                    // files read-only; a sandbox is private writable runtime state, so retaining
+                    // that bit makes the subsequent patch fail even though no game is running.
+                    FileAttributes attributes = File.GetAttributes(destination);
+                    if ((attributes & FileAttributes.ReadOnly) != 0)
+                        File.SetAttributes(destination, attributes & ~FileAttributes.ReadOnly);
                 }
                 return target;
             }

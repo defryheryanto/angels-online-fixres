@@ -23,3 +23,5 @@ $src  = @(
   $src
 if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 Write-Host "Built: $out"
+$clientPathConfig = Join-Path $root "fixres-client-path.txt"
+if (Test-Path $clientPathConfig) { Copy-Item -LiteralPath $clientPathConfig -Destination (Join-Path $dist "fixres-client-path.txt") -Force }

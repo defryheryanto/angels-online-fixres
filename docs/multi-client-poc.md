@@ -4,7 +4,9 @@
 
 The main application now supports the dynamic workflow directly: select Screen 1, click **Fix UI**,
 then **Play**; select Screen 2, click **Fix UI**, then **Play** again. Each Fix UI click creates and
-prepares a unique sandbox under `%LOCALAPPDATA%\AngelsOnlineFixRes\clients`. Window movement tracks
+prepares a unique sandbox under the directory configured in `fixres-client-path.txt` beside the
+application. The shipped default is `D:\Games\Angels Online Fixres`. Environment variables are
+expanded, and relative paths are resolved from the application directory. Window movement tracks
 only the newly started process, so an existing client is never moved when another one launches.
 
 The game stores resolution in installation-level `angel.dat` and `midage.ini` files. Therefore,

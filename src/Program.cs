@@ -148,6 +148,25 @@ namespace AngelsFixRes
         static string ConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-path.txt"); }
         static string WindowModeConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-window-mode.txt"); }
         static string ScreenConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-screen.txt"); }
+        static string ClientRootConfigPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fixres-client-path.txt"); }
+
+        // Keep the multi-client storage location editable without rebuilding the application.
+        // Like fixres-path.txt, this configuration belongs to this copy of FixRes.
+        static string LoadClientRootPath()
+        {
+            const string fallback = @"D:\Games\Angels Online Fixres";
+            try
+            {
+                string path = File.Exists(ClientRootConfigPath())
+                    ? File.ReadAllText(ClientRootConfigPath()).Trim()
+                    : fallback;
+                if (path.Length == 0) path = fallback;
+                path = Environment.ExpandEnvironmentVariables(path);
+                if (!Path.IsPathRooted(path)) path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+                return Path.GetFullPath(path);
+            }
+            catch { return fallback; }
+        }
 
         DisplayInfo LoadSelectedDisplay()
         {
@@ -455,8 +474,7 @@ namespace AngelsFixRes
 
             try
             {
-                string sandboxRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "AngelsOnlineFixRes", "clients");
+                string sandboxRoot = LoadClientRootPath();
                 string profile = "client-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-screen" + selectedDisplay.Number;
                 string targetFolder = GameFiles.CreateClientSandbox(gameFolder, sandboxRoot, profile);
                 // Fill mode: render at a shipped layout and let the engine stretch it to fill the
@@ -487,8 +505,14 @@ namespace AngelsFixRes
                 RefreshStatus();
                 return true;
             }
-            catch (IOException) { RefreshStatus(); MessageBox.Show(this, "Could not write the client - please close the game first, then try again.", "File in use", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-            catch (UnauthorizedAccessException) { MessageBox.Show(this, "Permission denied. Try running this tool as administrator.", "Permission denied", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (IOException ex) { RefreshStatus(); MessageBox.Show(this,
+                "Windows could not prepare the isolated client.\r\n\r\n" + ex.Message +
+                "\r\n\r\nCheck free disk space and antivirus/Controlled Folder Access. Closing the game is only necessary if the path named above is the original game folder.",
+                "Could not prepare client", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (UnauthorizedAccessException ex) { MessageBox.Show(this,
+                "Windows denied access while preparing the isolated client.\r\n\r\n" + ex.Message +
+                "\r\n\r\nCheck antivirus/Controlled Folder Access or try running this tool as administrator.",
+                "Permission denied", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
             return false;
         }

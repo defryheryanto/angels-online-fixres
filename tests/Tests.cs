@@ -209,6 +209,31 @@ public static class Tests
         }
     }
 
+    static void TestClientSandbox()
+    {
+        string tmp = Path.Combine(Path.GetTempPath(), "aofixsandbox_" + Guid.NewGuid().ToString("N"));
+        string source = Path.Combine(tmp, "source"), root = Path.Combine(tmp, "clients");
+        Directory.CreateDirectory(source);
+        try
+        {
+            string dat = Path.Combine(source, GameFiles.DatName), ini = Path.Combine(source, GameFiles.IniName);
+            File.WriteAllBytes(dat, new byte[] { 1, 2, 3 });
+            File.WriteAllText(ini, "[OPTION]\r\nScreenWidth = 1280");
+            File.SetAttributes(dat, File.GetAttributes(dat) | FileAttributes.ReadOnly);
+            string sandbox = GameFiles.CreateClientSandbox(source, root, "client1");
+            string copiedDat = Path.Combine(sandbox, GameFiles.DatName);
+            Check(File.Exists(copiedDat), "sandbox: client files copied");
+            Check((File.GetAttributes(copiedDat) & FileAttributes.ReadOnly) == 0, "sandbox: copied read-only files made writable");
+            File.WriteAllBytes(copiedDat, new byte[] { 9 });
+            Check(File.ReadAllBytes(dat)[0] == 1, "sandbox: writes do not alter source installation");
+        }
+        finally
+        {
+            try { if (File.Exists(Path.Combine(source, GameFiles.DatName))) File.SetAttributes(Path.Combine(source, GameFiles.DatName), FileAttributes.Normal); } catch { }
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
     static void TestWobScaling()
     {
         string tmp = Path.Combine(Path.GetTempPath(), "aofixwob_" + Guid.NewGuid().ToString("N"));
@@ -244,6 +269,7 @@ public static class Tests
         TestRenderPatch();
         TestBorderless();
         TestGameFiles();
+        TestClientSandbox();
         TestWobScaling();
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL TESTS PASSED" : (failures + " TEST(S) FAILED"));
